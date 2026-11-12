@@ -249,7 +249,7 @@ function Result({ result }: { result: RunResult }) {
           { key: "bonus", header: text.teacherColumns.bonus, numeric: true },
           { key: "remains", header: text.teacherColumns.remains },
         ]}
-        rows={result.teachers.map((row) => ({ key: row.key, cells: { ...row } }))}
+        rows={result.teachers.map((row) => ({ key: row.key, cells: { ...row, name: <span className="block min-w-32">{row.name}</span> } }))}
         totals={{ name: text.total, ...result.totals, remains: "" }}
         empty={text.teachersEmpty}
       />

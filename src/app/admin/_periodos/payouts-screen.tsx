@@ -202,7 +202,8 @@ export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
               rows={shown.map((row) => ({
                 key: row.key,
                 cells: {
-                  teacher: row.teacher,
+                  // El nombre no se parte palabra por palabra: la tabla se desplaza, y su primera columna se queda fija.
+                  teacher: <span className="block min-w-32">{row.teacher}</span>,
                   status: (
                     <span className="flex flex-col gap-1">
                       <StatusBadge tone={row.tone}>{row.status}</StatusBadge>
@@ -218,7 +219,7 @@ export function PayoutsScreen({ view, done = null }: PayoutsScreenProps) {
                   subtotal: (
                     <span className="flex flex-col gap-1">
                       <span>{row.subtotal}</span>
-                      {row.minimum !== null && <span className="text-body-s text-text-2">{row.minimum}</span>}
+                      {row.minimum !== null && <span className="text-body-s whitespace-nowrap text-text-2">{row.minimum}</span>}
                     </span>
                   ),
                   vat: row.vat,

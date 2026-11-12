@@ -1301,8 +1301,8 @@ que no se ve leyendo un solo archivo:
   diciendo adentro. **El menú lateral** se viste desde afuera: `AdminFrame` envuelve a `SideFrame` en `side-plane` (`theme.css`), que
   alcanza al `<nav>` por su lugar (`& > div > nav`) porque `side-nav.tsx` no se editó (lo tocaba la 147); si ese armazón cambia, la
   utilidad se revisa, y el portal no la lleva todavía. `area` y `measure` entraron a `NON_TEXT_ATTRIBUTES` del lint. En maestros la
-  tabla va justo bajo «Todos» (su `caption` ya no se ve) e invitar va después. Sin capturas de un periodo, su cierre ni sus
-  liquidaciones: la base del prototipo no tiene periodos. Decisiones mías sin confirmar: el ancho de 72rem; el contenido angosto a la
+  tabla va justo bajo «Todos» (su `caption` ya no se ve) e invitar va después. En las tablas que se desplazan (el reparto del
+  cierre y las liquidaciones) el nombre del maestro lleva `min-w-32`: con el ancho único se partía palabra por palabra. Decisiones mías sin confirmar: el ancho de 72rem; el contenido angosto a la
   izquierda y no centrado; la capacidad como antetítulo; invitar después de la lista; los `<h2>` en `text-h3`; las capacidades del
   inicio como etiquetas; el menú sobre `surface-1` con los grupos en oro apagado.
 - **Lo que T-616 suma (solicitud 5, el portal del maestro)** (sin migración; solo lo que se pinta: ninguna guarda, acción, consulta ni
@@ -1337,9 +1337,9 @@ que no se ve leyendo un solo archivo:
   administración y el portal van ahora en una sola solicitud (la 151). **Un solo botón principal en el editor:** «Guardar»; «Enviar a
   revisión» y «Agregar módulo» son `secondary` (`Button` no tiene una secundaria fuerte). El tono de la etiqueta de «Para empezar»
   viaja como valor (`FirstStep.tone`), no se deduce del texto. Usa `tests/ui/tool-main.test.tsx`; de las aserciones existentes solo
-  cambiaron las de `firstSteps` en `_inicio/outcomes.test.ts`, que ahora esperan el tono. Sin capturas de «Para empezar», de la lista sin cursos, de pagos con
-  periodos ni de una liquidación, de comentarios con hilos, del formulario de datos fiscales (la base del prototipo no tiene periodos,
-  los comentarios están cerrados y falta la llave de cifrado en local), ni del maestro suspendido. Decisiones mías sin confirmar:
+  cambiaron las de `firstSteps` en `_inicio/outcomes.test.ts`, que ahora esperan el tono. Sin capturas de «Para empezar», de la lista sin cursos,
+  de comentarios con hilos, del formulario de datos fiscales (los comentarios están cerrados y en local faltan `PII_ENCRYPTION_KEYS` y
+  `PII_ENCRYPTION_ACTIVE_VERSION`), ni del maestro suspendido. Decisiones mías sin confirmar:
   «Portal» de antetítulo; generalizar el armazón en vez de duplicarlo; el ancho de 72rem también en el editor (antes 90rem); «Nuevo
   curso» bajo el título y no en la otra orilla; los filtros de comentarios en una ficha; el estado de «Para empezar» como etiqueta
   («Listo» en verde, «Pendiente» en atención); el video de la lección en su ficha.
