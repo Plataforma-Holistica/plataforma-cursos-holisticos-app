@@ -964,7 +964,7 @@ que no se ve leyendo un solo archivo:
   contra lo más claro de la foto con su velo. Usa `tests/ui/landing-page.test.tsx` y `tests/e2e/portada.spec.ts` (con el catálogo vacío de la corrida de siempre; exige AVIF y el tope de
   200 KB en el teléfono). Decisiones mías sin confirmar: la muestra son los cursos más nuevos, sin «Ver todo» (explorar pide sesión); el botón de la barra es secundario; en el teléfono la
   barra no lleva «Entrar» (va en el encabezado y en el pie); «Cómo funciona» sin constancias (T-504) ni la cifra de la lección; los textos de la portada. De la revisión del diff: ningún
-  texto habla de precio ni de suscripción (una prueba lo exige), la barra usa `z-(--z-sticky)`, la foto, el velo y el texto se apilan por su orden, sin capas negativas, y los enlaces
+  texto habla de precio ni de suscripción (una prueba lo exige; cambió con T-616, la 4b: ver su viñeta), la barra usa `z-(--z-sticky)`, la foto, el velo y el texto se apilan por su orden, sin capas negativas, y los enlaces
   sueltos de la barra y del pie miden `min-h-touch`. Para el A: nada que le toque.
 - **Lo que T-614 suma al carril B** (tercera parte, el acceso a la cuenta, sin migración; diseño §3.12; decisiones de Sergio del 2026-11-05: franja corta en el teléfono, y PA-12 y
   PA-15 con el logotipo y sin foto). Un marco, `src/app/(cuenta)/_lib/access-frame.tsx` (`AccessFrame`): en computadora la foto de acceso (las ondas) en media pantalla con el
@@ -1306,8 +1306,10 @@ que no se ve leyendo un solo archivo:
 - **Lo que T-616 suma al carril B** (la 4b, los precios en la portada, sin migración; zona delicada, cobros solo de lectura;
   decisiones de Sergio del 2026-11-12 por el carril A, con la revisión independiente del diseño). **La portada no lee la oferta
   fresca:** lee la vitrina, `planShowcase` (`src/services/billing/showcase.ts`, pura, y su armado `showcase-service.ts`), que recuerda
-  lo leído 60 s y el «no se supo» 15 s (decisión del carril A sin confirmar), comparte la lectura en curso, nunca rechaza y reporta una
-  vez por lectura fallida (`plans_showcase_unavailable`). Contesta solo el plan, su total y la versión del texto del cobro recurrente.
+  lo leído 60 s y el «no se supo» 15 s (decisión del carril A sin confirmar), comparte la lectura en curso con un tope de 3 s
+  (`SHOWCASE_READ_TIMEOUT_MS`: sin él, un socket mudo colgaría la portada en cada visita; lo que llegue tarde se descarta), nunca
+  rechaza y reporta una vez por lectura fallida (`plans_showcase_unavailable`). Un total que no es un entero positivo no dice su
+  equivalente. Contesta solo el plan, su total y la versión del texto del cobro recurrente.
   Cada instancia guarda su copia: al entrar un precio programado, la portada puede mostrar el anterior hasta un minuto, y su enlace no
   lleva el monto. `/planes`, PA-32 y la salida a pagar siguen con `planOffer`, fresco: si leyeran de la memoria, `changed` y
   `refresh()` harían un ciclo. `tests/architecture/billing.test.ts` lo exige: la vitrina solo en su servicio y en la portada, nada de

@@ -91,6 +91,9 @@ describe("PA-04, cifras y direcciones", () => {
     // Exacto, no sube: $1,200.00 al año son $100.00 al mes.
     expect(monthlyEquivalent(120000)).toBe(10000);
     expect(monthlyEquivalent(12)).toBe(1);
+    // Los bordes: cero da cero, y un total grande sigue al centavo ($99,999,999.99 al año).
+    expect(monthlyEquivalent(0)).toBe(0);
+    expect(monthlyEquivalent(9_999_999_999)).toBe(833_333_334);
   });
 
   it("la dirección lleva el plan y el destino solo si los hay", () => {

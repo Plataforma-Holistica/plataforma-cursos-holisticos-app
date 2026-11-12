@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Offer } from "./checkout";
-import { createPlanShowcase, SHOWCASE_FAILURE_MEMORY_MS, SHOWCASE_MEMORY_MS } from "./showcase";
+import { createPlanShowcase, SHOWCASE_FAILURE_MEMORY_MS, SHOWCASE_MEMORY_MS, SHOWCASE_READ_TIMEOUT_MS } from "./showcase";
 
 // Los precios de la portada (T-616, solicitud 4b), con la base simulada y el reloj en la mano. Una memoria corta para la página más
 // visitada: a lo más una lectura por minuto y por instancia, también cuando no se pudo leer. `/planes` y la salida a pagar no la usan
@@ -108,6 +108,50 @@ describe("planShowcase", () => {
     await expect(planShowcase()).resolves.toEqual({ kind: "unavailable" });
     clock += SHOWCASE_FAILURE_MEMORY_MS;
     await expect(planShowcase()).resolves.toEqual({ kind: "unavailable" });
+  });
+
+  describe("una lectura que nunca termina", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("se corta a los 3 s: contesta que no se supo, lo reporta y suelta la lectura; la siguiente vez vencida lee otra vez", async () => {
+      vi.useFakeTimers();
+      let hang = true;
+      const { planShowcase, offer, reported, advance } = setup(() => (hang ? new Promise<Offer>(() => undefined) : Promise.resolve(OFFER)));
+      const visits = [planShowcase(), planShowcase()];
+      await vi.advanceTimersByTimeAsync(SHOWCASE_READ_TIMEOUT_MS - 1);
+      let settled = false;
+      void Promise.all(visits).then(() => (settled = true));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await Promise.all(visits)).toEqual([{ kind: "unavailable" }, { kind: "unavailable" }]);
+      expect(reported).toEqual(["plans_showcase_unavailable"]);
+      // La base volvió: pasado el recuerdo de la falla, otra lectura, y no la que quedó colgada.
+      hang = false;
+      advance(SHOWCASE_FAILURE_MEMORY_MS);
+      expect((await planShowcase()).kind).toBe("ready");
+      expect(offer).toHaveBeenCalledTimes(2);
+    });
+
+    it("si la lectura cortada llega tarde, no pisa lo que se leyó después", async () => {
+      vi.useFakeTimers();
+      let late!: (offer: Offer) => void;
+      const NEWER: Offer = { ...OFFER, plans: [{ ...OFFER.plans[0]!, amountCents: 39900 }] };
+      const reads = [new Promise<Offer>((resolve) => (late = resolve)), Promise.resolve(NEWER)];
+      const { planShowcase, advance } = setup(() => reads.shift()!);
+      const first = planShowcase();
+      await vi.advanceTimersByTimeAsync(SHOWCASE_READ_TIMEOUT_MS);
+      expect(await first).toEqual({ kind: "unavailable" });
+      advance(SHOWCASE_FAILURE_MEMORY_MS);
+      const second = await planShowcase();
+      expect(second.kind === "ready" && second.plans[0]?.amountCents).toBe(39900);
+      late(OFFER);
+      await vi.advanceTimersByTimeAsync(0);
+      const third = await planShowcase();
+      expect(third.kind === "ready" && third.plans[0]?.amountCents).toBe(39900);
+    });
   });
 
   it("si el reloj va hacia atrás, lo recordado no vale: vuelve a leer", async () => {

@@ -41,7 +41,6 @@ function returnOf(input: string): string | null {
   return resolved === input ? resolved : null;
 }
 
-
 export default async function PlansPage({ searchParams }: { searchParams: Promise<Search> }) {
   const query = readPlansQuery(await searchParams, returnOf);
   const [who, offer] = await Promise.all([publicViewer(), planOffer()]);

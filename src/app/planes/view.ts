@@ -63,7 +63,9 @@ export function planCardText(plan: CheckoutPlan, amountCents: number): { name: s
     name: plan === "monthly" ? text.monthly : text.annual,
     price: t(plan === "monthly" ? text.perMonth : text.perYear, { price: priceText(amountCents) }),
     repeat: t(text.planNote, { repeat: plan === "monthly" ? text.monthlyRepeat : text.annualRepeat }),
-    equivalent: plan === "annual" ? t(text.annualEquivalent, { price: priceText(monthlyEquivalent(amountCents)) }) : null,
+    // Solo de un total que es un entero positivo de centavos: de otro, «Equivale a -$0.00» no diría nada cierto.
+    equivalent:
+      plan === "annual" && Number.isInteger(amountCents) && amountCents > 0 ? t(text.annualEquivalent, { price: priceText(monthlyEquivalent(amountCents)) }) : null,
   };
 }
 

@@ -14,6 +14,12 @@ import type { CheckoutPlan, Offer } from "./checkout";
 
 export const SHOWCASE_MEMORY_MS = 60_000;
 export const SHOWCASE_FAILURE_MEMORY_MS = 15_000;
+/**
+ * Lo más que espera la portada a la base. Las visitas comparten la lectura en curso: sin tope, un socket mudo colgaría la portada en
+ * cada visita hasta reciclar la instancia, aunque la base ya hubiera vuelto. Pasado el tope se dice «no se supo» (sin cifras) y se
+ * suelta la lectura; si la de la base llega después, se descarta.
+ */
+export const SHOWCASE_READ_TIMEOUT_MS = 3_000;
 
 export type PlanShowcase =
   | { kind: "ready"; plans: { plan: CheckoutPlan; amountCents: number }[]; recurringVersion: number | null }
@@ -37,8 +43,12 @@ export function createPlanShowcase(deps: PlanShowcaseDeps): { planShowcase: () =
   };
 
   async function read(): Promise<PlanShowcase> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error("la base no contestó a tiempo")), SHOWCASE_READ_TIMEOUT_MS);
+    });
     try {
-      const offer = await deps.offer();
+      const offer = await Promise.race([deps.offer(), timeout]);
       return {
         kind: "ready",
         plans: offer.plans.map(({ plan, amountCents }) => ({ plan, amountCents })),
@@ -48,6 +58,8 @@ export function createPlanShowcase(deps: PlanShowcaseDeps): { planShowcase: () =
       // Una vez por lectura fallida, no por visita. Si reportar falla, la portada sigue igual.
       await deps.report("plans_showcase_unavailable").catch(() => undefined);
       return { kind: "unavailable" };
+    } finally {
+      clearTimeout(timer);
     }
   }
 

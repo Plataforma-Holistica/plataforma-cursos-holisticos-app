@@ -84,17 +84,32 @@ describe("PA-04, la vista", () => {
 describe("la vitrina de la portada (T-616, solicitud 4b)", () => {
   const READY = { kind: "ready" as const, plans: OFFER.plans.map(({ plan, amountCents }) => ({ plan, amountCents })), recurringVersion: 0 };
 
-  it("cada tarjeta dice lo mismo que la de /planes para el mismo plan y monto", () => {
+  it("cada tarjeta de la portada dice lo mismo que la de /planes, para la misma oferta", () => {
+    const plan = fc.record({ plan: fc.constantFrom("monthly" as const, "annual" as const), amountCents: fc.integer({ min: 1, max: 10_000_000 }) });
     fc.assert(
-      fc.property(fc.constantFrom("monthly" as const, "annual" as const), fc.integer({ min: 1, max: 10_000_000 }), (plan, amountCents) => {
-        const offer: Offer = { ...OFFER, plans: [{ plan, amountCents, lookupKey: "x", nextChargeAt: "2026-12-10T18:00:00Z" }] };
-        const view = plansView(offer, { plan: null, returnTo: null, canceled: false }, PAY, legal);
-        if (view.kind !== "ready") return false;
-        const card = view.cards[0]!;
-        const text = planCardText(plan, amountCents);
-        return text.name === card.name && text.price === card.price && text.repeat === card.repeat && text.equivalent === card.equivalent;
+      fc.property(fc.uniqueArray(plan, { minLength: 1, maxLength: 2, selector: (each) => each.plan }), (plans) => {
+        const offer: Offer = { ...OFFER, plans: plans.map((each) => ({ ...each, lookupKey: "x", nextChargeAt: "2026-12-10T18:00:00Z" })) };
+        const shown = showcaseView({ kind: "ready", plans, recurringVersion: OFFER.recurring!.version }, legal);
+        const page = plansView(offer, { plan: null, returnTo: null, canceled: false }, PAY, legal);
+        if (shown.kind !== "ready" || page.kind !== "ready") return false;
+        const pick = (card: { plan: string; name: string; price: string; repeat: string; equivalent: string | null; href: string; chooseLabel: string }) => ({
+          plan: card.plan,
+          name: card.name,
+          price: card.price,
+          repeat: card.repeat,
+          equivalent: card.equivalent,
+          href: card.href,
+          chooseLabel: card.chooseLabel,
+        });
+        expect(shown.cards.map(pick)).toEqual(page.cards.map(pick));
+        return true;
       }),
     );
+  });
+
+  it("el equivalente solo se dice de un total que es un entero positivo de centavos", () => {
+    expect(planCardText("annual", 299000).equivalent).toBe("Equivale a $249.17 al mes.");
+    for (const amount of [0, -1, -299000, 1.5, Number.NaN]) expect(planCardText("annual", amount).equivalent, String(amount)).toBeNull();
   });
 
   it("con los dos planes: una tarjeta por plan, cada una a elegirlo en /planes, sin el monto en la dirección", () => {

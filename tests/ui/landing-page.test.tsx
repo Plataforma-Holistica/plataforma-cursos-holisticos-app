@@ -160,6 +160,10 @@ describe("la portada (PA-01)", () => {
     expect(section.textContent).not.toMatch(/\$|MXN|\d/);
     expect(within(section).getByRole("list", { name: "Cualquier plan incluye:" })).toBeInTheDocument();
     expect(within(section).getByRole("link", { name: landing.plans.seeAll })).toHaveAttribute("href", "/planes");
+    // Sin saber si hay venta, el encabezado no promete «Suscribirme».
+    const main = screen.getByRole("main");
+    expect(within(main).getByRole("link", { name: landing.hero.signUp })).toHaveAttribute("href", "/registro");
+    expect(within(main).queryByRole("link", { name: landing.hero.subscribe })).toBeNull();
   });
 
   it("la foto del encabezado es decorativa y carga primero", async () => {
@@ -235,7 +239,7 @@ describe("la portada (PA-01)", () => {
     const container = await renderPage();
     const section = screen.getByRole("region", { name: landing.plans.title });
     const outside = (container.textContent ?? "").replace(section.textContent ?? "", "");
-    expect(outside).not.toMatch(/\$|MXN/);
+    expect(outside).not.toMatch(/\$|MXN|precio/i);
   });
 
   it("la cabecera lleva la flor grande, decorativa, sobre el titular", async () => {
