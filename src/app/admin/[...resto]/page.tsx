@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { SuspendedScreen, UnavailableScreen } from "@/app/(cuenta)/_lib/states";
 import { requireAdmin } from "@/app/_lib/guard";
 import { ROUTES, teamDestination } from "@/services/account/navigation";
+import { navAccess } from "@/services/account/nav";
 
 import { AdminFrame } from "../_lib/frame";
 import { sectionAt } from "../_lib/sections";
@@ -42,7 +43,7 @@ export default async function AdminRestPage({ params }: { params: Promise<{ rest
   if (step.kind === "forbidden") return <ForbiddenScreen capability={step.capability} />;
   if (section !== null) {
     return (
-      <AdminFrame path={path} capabilities={step.capabilities}>
+      <AdminFrame path={path} capabilities={step.capabilities} portal={(await navAccess(step.claims)).portal}>
         {section.render(step.claims)}
       </AdminFrame>
     );

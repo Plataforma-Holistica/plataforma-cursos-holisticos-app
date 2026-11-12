@@ -15,6 +15,7 @@ import {
   sessionCount,
   type Person,
 } from "./support/stack";
+import { signOutFromBar } from "./support/nav";
 
 // La guarda de sesión en las pantallas (flujo de la app §6.2; diseño PA-15): quién llega a
 // qué, y lo que se le pide antes a una cuenta a la que le falta algo.
@@ -176,7 +177,7 @@ test("sin JavaScript también se entra, se completa la cuenta y se sale", async 
     expect(await profileName(nueva.id)).toBe("Ana sin JavaScript");
     expect(await grantedDocTypes(nueva.id)).toHaveLength(3);
 
-    await page.getByRole("button", { name: "Salir" }).click();
+    await signOutFromBar(page);
     await expect(page).toHaveURL("/");
     expect(await sessionCount(nueva.id)).toBe(0);
   });

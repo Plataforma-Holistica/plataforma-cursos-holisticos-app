@@ -19,6 +19,7 @@ import {
   waitForMails,
   type Person,
 } from "./support/stack";
+import { signOutFromBar } from "./support/nav";
 
 // Recuperar la contraseña, de extremo a extremo (FL-06; diseño PA-13): la aplicación
 // compilada contra la base, el Auth y el buzón locales. El enlace sale del buzón.
@@ -412,7 +413,7 @@ test("recuperar una cuenta con otra abierta en ese navegador la cierra, y lleva 
 
   await signIn(page, { email: ana.email, password: NEW_PASSWORD });
   await expect(page).toHaveURL("/inicio");
-  await expect(page.getByText(`Entraste como ${ana.email}.`)).toBeVisible();
+  await expect(page.getByRole("main").getByText(`Entraste como ${ana.email}.`)).toBeVisible();
 });
 
 test("pedir una recuperación desde otro sitio se rechaza y no deja rastro", async ({ page, request, browser }) => {
@@ -485,7 +486,7 @@ for (const javaScriptEnabled of [true, false]) {
       expect((await cookie("plataforma-resguardo"))?.value).toBe(ticket?.value);
 
       // Salir, sí: quien sale ya no está en ese navegador.
-      await page.getByRole("button", { name: "Salir" }).click();
+      await signOutFromBar(page);
       await expect(page).toHaveURL("/");
       expect(await cookie("plataforma-resguardo")).toBeUndefined();
       expect(await cookie(SESSION_COOKIE)).toBeUndefined();
