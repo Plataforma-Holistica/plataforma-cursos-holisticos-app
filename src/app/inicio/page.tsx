@@ -14,6 +14,7 @@ import { accountProfile } from "@/services/account/account";
 import { coursePath, explorePath, lessonPath, MY_LIST_ANCHOR, ROUTES, teacherPath } from "@/services/account/navigation";
 import { readNotice } from "@/services/account/notice";
 import { homeShelf, myList, type PracticeRow, type ShelfCourse } from "@/services/browse/browse";
+import { ROW_LIMIT } from "@/services/browse/shelf";
 import type { ContinueCourse } from "@/services/progress/continue";
 import { continueWatching } from "@/services/progress/progress";
 import { Button } from "@/ui/button";
@@ -192,7 +193,7 @@ export default async function HomePage() {
         )}
 
         {current !== undefined && currentCourse !== undefined && (
-          <div className="mt-10 sm:mt-14">
+          <div className="mt-6 sm:mt-14">
             <Feature
               id="continuar-viendo"
               heading={text.continueTitle}
@@ -220,7 +221,7 @@ export default async function HomePage() {
           <>
             {/* «Para empezar» es para quien no ha empezado nada: si no se supo, no se sabe (PA-20). */}
             {firstStarter !== undefined && firstStarterCourse !== undefined && (
-              <div className="mt-10 sm:mt-14">
+              <div className="mt-6 sm:mt-14">
                 <Feature
                   id="para-empezar"
                   heading={text.startersTitle}
@@ -269,10 +270,11 @@ export default async function HomePage() {
                   {t(text.teachersTitle)}
                 </h2>
                 {/* En el teléfono se desliza (y se desvanece en el borde); desde `sm`, la rejilla. Aire arriba (`pt-3`, devuelto
-                    con `-mt-3`), como en `Carousel`: desplazar en horizontal también recorta en vertical, y cortaba el anillo de foco. */}
+                    con `-mt-3`), como en `Carousel`: desplazar en horizontal también recorta en vertical, y cortaba el anillo de foco.
+                    Y el ajuste a ficha con el margen (`scroll-px-4`): sin él, la primera quedaba pegada al borde. */}
                 <ul
                   aria-labelledby="por-maestro"
-                  className="-mx-4 -mt-3 flex snap-x gap-4 overflow-x-auto px-4 pt-3 pb-2 scrollbar-none max-sm:mask-r-from-85% sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-x-6 sm:gap-y-8 sm:overflow-visible sm:px-0 lg:grid-cols-6"
+                  className="-mx-4 -mt-3 flex snap-x scroll-px-4 gap-4 overflow-x-auto px-4 pt-3 pb-2 scrollbar-none max-sm:mask-r-from-85% sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-x-6 sm:gap-y-8 sm:overflow-visible sm:px-0 lg:grid-cols-6"
                 >
                   {shelf.shelf.teachers.map((teacher) => {
                     const href = teacherPath(teacher.slug);
@@ -307,14 +309,18 @@ function PracticeTiles({ rows }: { rows: readonly PracticeRow[] }) {
       <h2 id="practicas" className="text-h2">
         {text.practicesTitle}
       </h2>
-      {/* Aire arriba para el anillo de foco, como en «Por maestro». */}
+      {/* Aire arriba para el anillo de foco y el ajuste a ficha con el margen, como en «Por maestro». */}
       <ul
         aria-labelledby="practicas"
-        className="-mx-4 -mt-3 flex snap-x gap-3 overflow-x-auto px-4 pt-3 pb-2 scrollbar-none max-sm:mask-r-from-85% sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:px-0 lg:grid-cols-4 xl:grid-cols-6"
+        className="-mx-4 -mt-3 flex snap-x scroll-px-4 gap-3 overflow-x-auto px-4 pt-3 pb-2 scrollbar-none max-sm:mask-r-from-85% sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:px-0 lg:grid-cols-4 xl:grid-cols-6"
       >
         {rows.map((row) => {
           const position = row.courses[0]?.practice?.position ?? null;
-          const count = t(plural(row.courses.length, text.practiceCount), { count: row.courses.length });
+          // El catálogo corta cada fila a su tope: una que llega a él puede tener más, y la ficha no dice menos de los que hay.
+          const count =
+            row.courses.length >= ROW_LIMIT
+              ? t(text.practiceCountAtLeast, { count: ROW_LIMIT })
+              : t(plural(row.courses.length, text.practiceCount), { count: row.courses.length });
           return (
             <li key={row.slug} className="relative w-44 shrink-0 snap-start sm:w-auto">
               <Link href={explorePath({ practice: row.slug })} className="group relative block overflow-hidden rounded-lg edge-light shadow-raised outline-offset-4 focus-visible:shadow-focus">

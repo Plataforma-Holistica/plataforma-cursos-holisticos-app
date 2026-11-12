@@ -43,6 +43,11 @@ function ratio(a: Rgb, b: Rgb): number {
   return Math.floor(((light + 0.05) / (dark + 0.05)) * 100) / 100;
 }
 
+/** Un color con su opacidad sobre otro: lo que se ve. */
+function mix(top: Rgb, alpha: number, bottom: Rgb): Rgb {
+  return top.map((value, index) => Math.round(value * alpha + (bottom[index] ?? 0) * (1 - alpha))) as unknown as Rgb;
+}
+
 const AA_TEXT = 4.5;
 const AA_UI = 3;
 const EXEMPT = 0;
@@ -137,6 +142,29 @@ describe("contraste de los tokens (diseño, secciones 3.3 y 3.4)", () => {
     const value = ratio(rgbOf(element), [veiled, veiled, veiled]);
     expect(value).toBeGreaterThanOrEqual(AA_TEXT);
     expect(value).toBe(expected);
+  });
+
+  // T-616, solicitud 3 (pedido del carril A): el conteo de una ficha de práctica del inicio va en `text-2` sobre su velo
+  // (`from-bg/85` abajo), encima del tono de la práctica. El peor caso: el tono pleno debajo del velo, en cada tono.
+  it.each(["art-1", "art-2", "art-3", "art-4", "art-5", "art-6", "art-7", "art-8"].map((tone, index) => [tone, [9.75, 9.67, 9.65, 9.82, 9.78, 9.72, 9.76, 9.79][index] ?? 0] as const))(
+    "text-2 sobre el velo de una ficha de práctica de %s",
+    (tone, expected) => {
+      const value = ratio(rgbOf("text-2"), mix(rgbOf("bg"), 0.85, rgbOf(tone)));
+      expect(value).toBeGreaterThanOrEqual(AA_TEXT);
+      expect(value, "actualiza la tabla del diseño").toBe(expected);
+    },
+  );
+
+  // El antetítulo de una cabecera va en el oro pleno sobre su resplandor (`--glow-header`): el peor caso es el centro del
+  // resplandor, el `--glow` con su opacidad sobre el fondo.
+  it("el antetítulo en oro sobre el centro del resplandor de la cabecera", () => {
+    const glow = css.match(/--glow:\s*rgb\((\d+) (\d+) (\d+) \/ ([\d.]+)\)\s*;/);
+    if (glow === null) throw new Error("La hoja de tokens no define --glow como rgb con opacidad.");
+    const [, r, g, b, alpha] = glow.map(Number) as [number, number, number, number, number];
+    expect(css).toMatch(/--glow-header:\s*radial-gradient\([^;]*var\(--glow\)/);
+    const value = ratio(rgbOf("accent"), mix([r, g, b], alpha, rgbOf("bg")));
+    expect(value).toBeGreaterThanOrEqual(AA_TEXT);
+    expect(value, "actualiza la tabla del diseño").toBe(9.78);
   });
 
   it("text-3 es el texto más tenue: no hay un gris más claro que pase por texto", () => {

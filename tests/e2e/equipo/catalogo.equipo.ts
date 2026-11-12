@@ -135,6 +135,14 @@ test("FL-10: quien no ha empezado nada ve «Para empezar», «Nuevos», sus prá
   // Solo aparece lo publicado.
   await expect(page.getByText(HIDDEN)).toHaveCount(0);
   expect(await a11yViolations(page)).toEqual([]);
+  // En el teléfono, el botón del protagonista cabe en la primera pantalla. Cambió por el requisito (T-616, solicitud 3a, pedido del
+  // carril A): T-614 pedía que el primer bloque se viera sin bajar, y la cabecera alta lo empujaba debajo del pliegue.
+  const window = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect(starters.getByRole("link", { name: `${first.title}, con ${first.teacher}` }).getByText("Ver el curso")).toBeInViewport({ ratio: 1 });
+  if (window !== null) await page.setViewportSize(window);
+  await page.reload();
   // Cada práctica se alcanza desde el inicio. Cambió por el requisito (T-616, solicitud 3a): antes cada práctica era un carrusel con
   // sus cursos (la lista «Meditación e2e»); ahora es una ficha en «Prácticas» que lleva a explorar con su filtro, y ahí está el curso
   // recién publicado de esa práctica.

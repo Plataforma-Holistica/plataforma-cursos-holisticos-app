@@ -3,7 +3,7 @@
 import { ArrowRight, ChevronDown, Search, SlidersHorizontal, X } from "lucide";
 import Form from "next/form";
 import Link from "next/link";
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, type MouseEvent, useEffect, useId, useRef, useState } from "react";
 
 import { useHydrated } from "@/app/(cuenta)/_lib/hooks";
 
@@ -38,8 +38,12 @@ export interface ExploreFormOption {
   name: string;
 }
 
-/** Una ficha de práctica: su nombre, a dónde lleva (lo mostrado con esa práctica) y si es la elegida. «Todas» va primero. */
+/**
+ * Una ficha de práctica: su práctica (vacía la de «Todas», que va primero), su nombre, a dónde lleva sin JavaScript (lo
+ * mostrado con esa práctica) y si es la elegida.
+ */
 export interface PracticeChip {
+  slug: string;
   name: string;
   href: string;
   current: boolean;
@@ -117,6 +121,20 @@ export function ExploreForm({ action, query, shownPath, withoutSearch, practices
   const submitSoon = () => {
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = setTimeout(() => submitNow(true), PAUSE_MS);
+  };
+
+  // Una ficha de práctica, con JavaScript: en vez de su enlace (que lleva la búsqueda mostrada), el formulario sale ya con lo
+  // tecleado en ese momento y esa práctica, y no sale nada más después (revisión del carril A de la 3a: si se escribía y se
+  // pulsaba una ficha antes de la búsqueda sola, ganaba la ficha y se borraba lo escrito). El campo oculto se pone a mano
+  // antes de enviar, porque el estado se pinta después. Con una tecla de modificación (abrir en otra pestaña) o sin
+  // JavaScript, el enlace de siempre.
+  const chosenField = useRef<HTMLInputElement>(null);
+  const pickPractice = (event: MouseEvent<HTMLAnchorElement>, slug: string) => {
+    if (!js || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    setChosen((now) => ({ ...now, practica: slug }));
+    if (chosenField.current !== null) chosenField.current.value = slug;
+    submitNow(false);
   };
   // Al salir de un campo con un envío pendiente, sale ya: si lo que sigue es pulsar un enlace, su
   // navegación llega después y es la que queda.
@@ -227,7 +245,7 @@ export function ExploreForm({ action, query, shownPath, withoutSearch, practices
           </div>
           {/* La práctica elegida viaja con la búsqueda: las fichas de abajo son enlaces, no campos. Va después del buscador:
               sin JavaScript la dirección sale en el orden de los campos, y empieza por la búsqueda (`/explorar?q=…`, FL-11). */}
-          <input type="hidden" name="practica" value={chosen.practica} />
+          <input ref={chosenField} type="hidden" name="practica" value={chosen.practica} />
         </Form>
       </div>
 
@@ -236,13 +254,14 @@ export function ExploreForm({ action, query, shownPath, withoutSearch, practices
           <nav aria-label={text.practice} className="min-w-0 sm:flex-1">
             {/* Aire arriba (`pt-3`, devuelto con `-mt-3`), como en `Carousel`: la lista desplaza en horizontal, y eso también
                 recorta en vertical; sin él se cortaba el anillo de foco de las fichas. */}
-            <ul className="-mx-4 -mt-3 flex snap-x gap-2 overflow-x-auto px-4 pt-3 pb-1 scrollbar-none max-sm:mask-r-from-85% sm:mx-0 sm:flex-wrap sm:px-0">
+            <ul className="-mx-4 -mt-3 flex snap-x scroll-px-4 gap-2 overflow-x-auto px-4 pt-3 pb-1 scrollbar-none max-sm:mask-r-from-85% sm:mx-0 sm:flex-wrap sm:px-0">
               {practices.map((chip) => (
                 <li key={chip.href} className="shrink-0 snap-start">
                   <Link
                     href={chip.href}
                     replace
                     scroll={false}
+                    onClick={(event) => pickPractice(event, chip.slug)}
                     aria-current={chip.current ? "true" : undefined}
                     className={cx(
                       "inline-flex min-h-touch items-center rounded-full border px-4 text-body-s whitespace-nowrap transition-colors duration-(--duration-fast) ease-standard",

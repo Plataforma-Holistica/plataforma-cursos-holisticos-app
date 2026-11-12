@@ -108,7 +108,7 @@ export function Feature({ id, heading, seeAll, lead, rows }: FeatureProps) {
   const shown = rows.slice(0, SHOWN_ROWS);
   const rest = rows.slice(SHOWN_ROWS);
   return (
-    <section aria-labelledby={id} className="flex flex-col gap-5 px-4 sm:px-8">
+    <section aria-labelledby={id} className="flex flex-col gap-4 px-4 sm:gap-5 sm:px-8">
       <div className="flex items-baseline justify-between gap-4">
         <h2 id={id} className="eyebrow text-accent-muted">
           {heading}
@@ -129,17 +129,26 @@ export function Feature({ id, heading, seeAll, lead, rows }: FeatureProps) {
             seed={lead.courseKey}
             shape="wide"
             largeMotif
-            className="transition duration-(--duration-base) ease-standard group-hover:brightness-110"
+            // Más baja que el 16:9 de siempre: en el teléfono, para que el botón quepa en la primera pantalla (T-614); en
+            // computadora, para que no quede un hueco vacío bajo el motivo (revisión del carril A de la 3a).
+            className="transition duration-(--duration-base) ease-standard group-hover:brightness-110 max-sm:aspect-12/5 lg:aspect-2/1"
           />
-          {lead.progress !== null && (
+          {/* Al centro, nunca vacía: el botón de reproducir si se está viendo; si no, la roseta en trazo. */}
+          {lead.progress !== null ? (
             <>
-              <span data-play className="absolute inset-0 flex items-center justify-center">
+              <span data-center data-play className="absolute inset-0 flex items-center justify-center">
                 <span className="relative flex size-16 items-center justify-center rounded-full text-text float-plane edge-light transition duration-(--duration-base) ease-standard motion-safe:group-hover:scale-105">
                   <Icon icon={Play} size={24} className="translate-x-0.5" />
                 </span>
               </span>
               <Bar progress={lead.progress} />
             </>
+          ) : (
+            <span data-center className="absolute inset-0 flex items-center justify-center">
+              <span className="relative flex size-16 items-center justify-center rounded-full float-plane edge-light">
+                <Rosette complete={false} className="size-9" />
+              </span>
+            </span>
           )}
         </Link>
         <div className="flex min-w-0 flex-col lg:col-span-6">

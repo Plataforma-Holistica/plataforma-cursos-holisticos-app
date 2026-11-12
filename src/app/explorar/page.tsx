@@ -11,6 +11,7 @@ import { requireSession } from "@/app/_lib/guard";
 import { messages, plural, t } from "@/messages";
 import { coursePath, explorePath, ROUTES, teacherPath } from "@/services/account/navigation";
 import { explore, exploreQueryOf, myList, type ExploreQuery, type ShelfCourse } from "@/services/browse/browse";
+import { ROW_LIMIT } from "@/services/browse/shelf";
 import { Button } from "@/ui/button";
 import { Carousel } from "@/ui/carousel";
 import { CourseCard } from "@/ui/course-card";
@@ -136,8 +137,9 @@ function Explore({ answer, saved }: { answer: Ready; saved: ReadonlySet<string> 
         shownPath={explorePath(query)}
         withoutSearch={explorePath({ ...query, q: null })}
         practices={[
-          { name: text.anyPractice, href: explorePath({ ...query, practice: null }), current: query.practice === null },
+          { slug: "", name: text.anyPractice, href: explorePath({ ...query, practice: null }), current: query.practice === null },
           ...facets.practices.map((option) => ({
+            slug: option.slug,
             name: option.name,
             href: explorePath({ ...query, practice: option.slug }),
             current: query.practice === option.slug,
@@ -192,6 +194,10 @@ function Explore({ answer, saved }: { answer: Ready; saved: ReadonlySet<string> 
                   </li>
                 ))}
             </ul>
+            {/* El catálogo corta cada práctica a su tope: si alguna llegó a él, puede haber más, y se dice dónde verlos. */}
+            {shelf.practices.some((row) => row.courses.length >= ROW_LIMIT) && (
+              <p className="text-body-s text-text-2">{t(text.allTruncated, { count: ROW_LIMIT })}</p>
+            )}
           </section>
         )
       ) : (

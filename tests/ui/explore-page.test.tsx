@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { a11yViolations } from "../setup/a11y";
 
+import { ROW_LIMIT } from "@/services/browse/shelf";
+
 // Explorar y buscar (PA-21; T-210), con la guarda y el servicio simulados: qué pinta según lo
 // pedido y lo que contesta el servicio, y cuándo el formulario busca solo. Qué cursos cumplen
 // qué lo prueban src/services/browse/explore.test.ts y la integración 70.
@@ -107,7 +109,7 @@ describe("explorar (PA-21)", () => {
     expect(within(practiceChips()).getByRole("link", { name: "Meditación" })).toHaveAttribute("href", "/explorar?practica=meditacion");
     expect(within(practiceChips()).getByRole("link", { name: "Meditación" })).not.toHaveAttribute("aria-current");
     expect(chosenPractice(container)).toHaveValue("");
-    const all = screen.getByRole("list", { name: "Todos los cursos" });
+    const all = screen.getByRole("list", { name: "Cursos por práctica" });
     expect(within(all).getByRole("link", { name: "Respirar para dormir, con Ana Robles" })).toHaveAttribute("href", "/cursos/respirar");
     expect(screen.queryByRole("link", { name: /^Ver todo/ })).toBeNull();
     // La región que dice cuántos existe desde antes de la primera búsqueda, vacía.
@@ -121,9 +123,21 @@ describe("explorar (PA-21)", () => {
     const row = (slug: string, name: string, count: number) => ({ slug, name, tone: 3, courses: Array.from({ length: count }, (_, i) => ({ ...COURSE, slug: `${slug}-${i}`, title: `${name} ${i}` })) });
     mocks.explore.mockResolvedValue({ ...ready({}, null), shelf: { ...SHELF, practices: [row("a", "Alfa", 2), row("b", "Beta", 1), row("c", "Gama", 2)] } });
     render(await ExplorePage(params({})));
-    const links = within(screen.getByRole("list", { name: "Todos los cursos" })).getAllByRole("link");
+    const links = within(screen.getByRole("list", { name: "Cursos por práctica" })).getAllByRole("link");
     expect(links.map((link) => link.getAttribute("href"))).toEqual(["/cursos/a-0", "/cursos/a-1", "/cursos/b-0", "/cursos/c-0", "/cursos/c-1"]);
     expect(screen.queryByRole("region", { name: "Alfa" })).toBeNull();
+    // Ninguna fila llegó a su tope: no hay nada más que decir.
+    expect(screen.queryByText(/Cada práctica muestra/)).toBeNull();
+  });
+
+  // Revisión del carril A de la 3a: la rejilla sin filtro no es «todos los cursos» (el catálogo corta cada práctica a
+  // ROW_LIMIT y deja fuera los que no tienen práctica). Se llama por lo que es, y si una práctica llegó a su tope lo dice.
+  it("sin filtro, si una práctica llegó a su tope, una línea bajo la rejilla dice que hay más al elegirla", async () => {
+    const row = (slug: string, name: string, count: number) => ({ slug, name, tone: 3, courses: Array.from({ length: count }, (_, i) => ({ ...COURSE, slug: `${slug}-${i}` })) });
+    mocks.explore.mockResolvedValue({ ...ready({}, null), shelf: { ...SHELF, practices: [row("a", "Alfa", ROW_LIMIT), row("b", "Beta", 1)] } });
+    render(await ExplorePage(params({})));
+    const region = screen.getByRole("region", { name: "Cursos por práctica" });
+    expect(within(region).getByText(`Cada práctica muestra sus ${ROW_LIMIT} cursos más nuevos. Elige una arriba para ver todos los suyos.`)).toBeVisible();
   });
 
   it("la rejilla llega a lo más a cinco columnas, y el buscador mide a lo más 720 px con el envío dentro", async () => {
@@ -155,6 +169,8 @@ describe("explorar (PA-21)", () => {
     render(await ExplorePage(params({})));
     expect(screen.getByRole("searchbox")).toHaveClass("shadow-raised", "focus-visible:shadow-focus");
     expect(within(practiceChips()).getByRole("list")).toHaveClass("-mt-3", "pt-3");
+    // Revisión del carril A de la 3a: el ajuste a ficha alinea la primera con el margen, como en `Carousel`.
+    expect(within(practiceChips()).getByRole("list")).toHaveClass("scroll-px-4");
   });
 
   it("las fichas y los selectores van en una fila, y en el teléfono las fichas se desvanecen en el borde", async () => {
@@ -229,7 +245,7 @@ describe("explorar (PA-21)", () => {
     mocks.explore.mockResolvedValue(ready({}, null));
     mocks.myList.mockResolvedValue({ kind: "ready", courses: [] });
     render(await ExplorePage(params({})));
-    expect(within(screen.getByRole("list", { name: "Todos los cursos" })).getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" })).toBeVisible();
+    expect(within(screen.getByRole("list", { name: "Cursos por práctica" })).getByRole("button", { name: "Guardar en mi lista: Respirar para dormir" })).toBeVisible();
   });
 
   it("Mi lista: si no se pudo leer, las tarjetas van sin botón", async () => {
@@ -297,6 +313,31 @@ describe("el formulario de explorar busca solo", () => {
     document.addEventListener("submit", listen);
     return { sent: () => sent, disabled: () => disabled, stop: () => document.removeEventListener("submit", listen) };
   }
+
+  // Revisión del carril A de la 3a: una ficha de práctica llevaba la búsqueda mostrada, no la tecleada. Si se escribe y se
+  // pulsa una ficha antes de que la búsqueda salga sola, gana la ficha, con lo tecleado y su práctica, y no sale nada más.
+  it("con JavaScript, pulsar una ficha de práctica lleva lo que se tecleó en ese momento, con su práctica", async () => {
+    mocks.explore.mockResolvedValue(ready({}, null));
+    render(await ExplorePage(params({})));
+    vi.useFakeTimers();
+    const sent: [string, string][][] = [];
+    const listen = (event: Event) => {
+      sent.push([...new FormData(event.target as HTMLFormElement).entries()].map(([name, value]) => [name, String(value)]));
+      event.preventDefault();
+    };
+    document.addEventListener("submit", listen);
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "reiki" } });
+    const chip = within(practiceChips()).getByRole("link", { name: "Meditación" });
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+    act(() => {
+      chip.dispatchEvent(click);
+    });
+    // La navegación de la ficha (sin la búsqueda) no sale: la reemplaza el envío del formulario.
+    expect(click.defaultPrevented).toBe(true);
+    act(() => vi.advanceTimersByTime(400));
+    document.removeEventListener("submit", listen);
+    expect(sent).toEqual([[["q", "reiki"], ["practica", "meditacion"]]]);
+  });
 
   it("al dejar de escribir 400 ms, una sola vez", async () => {
     mocks.explore.mockResolvedValue(ready({}, null));

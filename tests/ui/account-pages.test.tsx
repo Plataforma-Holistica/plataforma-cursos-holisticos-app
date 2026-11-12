@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { a11yViolations } from "../setup/a11y";
 
 import { terms } from "@/messages/es/terms";
+import { ROW_LIMIT } from "@/services/browse/shelf";
 import { MOTIFS, motifFor } from "@/ui/motifs";
 
 // Las páginas de la cuenta, con la guarda y los servicios simulados: qué pinta cada una
@@ -343,6 +344,41 @@ describe("el inicio del alumno (PA-20; T-210)", () => {
     const starters = screen.getByRole("list", { name: "Para empezar" });
     expect(within(starters).getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(["/cursos/respirar", "/cursos/dos", "/cursos/tres"]);
     expect(within(starters).getByRole("link", { name: "Curso dos, con Ana Robles" })).toHaveTextContent("Ana Robles · Principiante");
+  });
+
+  // Revisión del carril A de la 3a: la portada del protagonista no queda vacía. Sin avance, la roseta al centro (en trazo); con
+  // avance, el botón de reproducir.
+  it("la portada del protagonista lleva al centro la roseta sin avance, o el botón de reproducir con él", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    const { unmount } = render(await HomePage());
+    const starter = screen.getByRole("region", { name: "Para empezar" }).querySelector("a[tabindex='-1']");
+    expect(starter?.querySelector("[data-center] svg g.stroke-text-2")).not.toBeNull();
+    expect(starter?.querySelector("[data-play]")).toBeNull();
+    unmount();
+    mocks.continueWatching.mockResolvedValue({ kind: "ready", courses: [watching("respirar", "Respirar para dormir")] });
+    render(await HomePage());
+    const current = screen.getByRole("region", { name: "Continuar viendo" }).querySelector("a[tabindex='-1']");
+    expect(current?.querySelector("[data-center][data-play]")).not.toBeNull();
+  });
+
+  // Revisión del carril A de la 3a: el servicio corta cada fila a ROW_LIMIT, y la ficha no dice menos cursos de los que hay.
+  it("una práctica que llega al tope de su fila dice «N o más cursos»; una abajo del tope, cuántos", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    const row = (slug: string, name: string, count: number) => ({ slug, name, tone: 3, courses: Array.from({ length: count }, (_, i) => ({ ...COURSE, slug: `${slug}-${i}` })) });
+    mocks.homeShelf.mockResolvedValue(shelfWith({ practices: [row("a", "Alfa", ROW_LIMIT), row("b", "Beta", ROW_LIMIT - 1)] }));
+    render(await HomePage());
+    const practices = screen.getByRole("list", { name: "Prácticas" });
+    expect(within(practices).getByRole("link", { name: `Alfa, ${ROW_LIMIT} o más cursos` })).toHaveTextContent(`${ROW_LIMIT} o más cursos`);
+    expect(within(practices).getByRole("link", { name: `Beta, ${ROW_LIMIT - 1} cursos` })).toBeInTheDocument();
+  });
+
+  // Revisión del carril A de la 3a: en el teléfono el carril se desliza, y su primera ficha se alinea con el margen de 16 px
+  // (sin `scroll-px-4`, el ajuste a ficha la pegaba al borde), como en `Carousel`.
+  it("los carriles de Prácticas y de «Por maestro» ajustan su primera ficha al margen", async () => {
+    mocks.requireSession.mockResolvedValue({ kind: "render", claims });
+    render(await HomePage());
+    expect(screen.getByRole("list", { name: "Prácticas" })).toHaveClass("scroll-px-4");
+    expect(screen.getByRole("list", { name: "Por maestro" })).toHaveClass("scroll-px-4");
   });
 
   it("«Mi lista» va después de «Para empezar» y antes de «Nuevos», con «Quitar» en cada curso, y se le pide con las claims de la guarda", async () => {

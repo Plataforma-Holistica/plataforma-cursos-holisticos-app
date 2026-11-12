@@ -33,8 +33,8 @@ export function PageHeader({ title, eyebrow, lead, photo, size = "regular", chil
   const hero = size === "hero";
   return (
     // La alta mide 368 px en computadora (T-616, solicitud 3: la cabecera del inicio a 360–380 px, para que el protagonista
-    // quede en la primera pantalla).
-    <div data-page-header className={cx("relative isolate overflow-hidden", hero && "flex min-h-72 flex-col justify-end sm:min-h-92", className)}>
+    // quede en la primera pantalla) y 224 en el teléfono, con menos aire: a 390 × 844 el botón del protagonista cabe sin bajar.
+    <div data-page-header className={cx("relative isolate overflow-hidden", hero && "flex min-h-56 flex-col justify-end sm:min-h-92", className)}>
       {photo !== undefined && (
         <>
           <Image src={photo} alt="" fill loading="eager" fetchPriority="high" sizes="(min-width: 1440px) 1440px, 100vw" className="object-cover" />
@@ -57,7 +57,7 @@ export function PageHeader({ title, eyebrow, lead, photo, size = "regular", chil
       <span aria-hidden="true" className="absolute inset-0 glow-header" />
       {/* La entrada anima solo lo que acompaña al título: el `<h1>` se pinta de inmediato, porque suele ser lo más
           grande que se ve al llegar y arrancarlo invisible retrasaba su pintado (LCP) los 480 ms de la entrada. */}
-      <div className={cx("relative mx-auto flex w-full max-w-page flex-col gap-3 px-4 sm:px-8", hero ? "pt-24 pb-12 sm:pb-16" : "pt-12 pb-10 sm:pt-24 sm:pb-14")}>
+      <div className={cx("relative mx-auto flex w-full max-w-page flex-col gap-3 px-4 sm:px-8", hero ? "pt-16 pb-8 sm:pt-24 sm:pb-16" : "pt-12 pb-10 sm:pt-24 sm:pb-14")}>
         {eyebrow !== undefined && <p className="animate-enter eyebrow text-accent">{eyebrow}</p>}
         <h1 className={cx("max-w-reading text-text", hero ? "text-display-xl" : "text-display-l")}>{title}</h1>
         {lead !== undefined && <div className="max-w-reading animate-enter text-body-l text-text-2">{lead}</div>}

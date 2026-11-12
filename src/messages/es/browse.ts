@@ -39,6 +39,8 @@ export const browse = defineMessages({
     // Las prácticas como fichas, que llevan a explorar con su filtro (T-616).
     practicesTitle: "Prácticas",
     practiceCount: { one: "{count} curso", other: "{count} cursos" },
+    // Una práctica que llega al tope de su fila: el catálogo la corta ahí, y puede haber más.
+    practiceCountAtLeast: "{count} o más cursos",
     practiceTile: "{name}, {count}",
     teachersTitle: "Por {maestro}",
     empty: "Estamos preparando los primeros cursos.",
@@ -70,8 +72,10 @@ export const browse = defineMessages({
     clearFilters: "Limpiar filtros",
     count: { one: "{count} curso", other: "{count} cursos" },
     resultsTitle: "Resultados",
-    // Sin filtro ni búsqueda, una sola rejilla, ordenada por práctica (T-616).
-    allTitle: "Todos los cursos",
+    // Sin filtro ni búsqueda, una sola rejilla, ordenada por práctica (T-616). No son todos: cada práctica va cortada a su
+    // tope y lo que no tiene práctica no entra. Si alguna llegó al tope, la línea de abajo lo dice.
+    allTitle: "Cursos por práctica",
+    allTruncated: "Cada práctica muestra sus {count} cursos más nuevos. Elige una arriba para ver todos los suyos.",
     teachersTitle: "{Maestros}",
     empty: "No encontramos cursos con esos filtros.",
     selectionTitle: "Nuevos",
