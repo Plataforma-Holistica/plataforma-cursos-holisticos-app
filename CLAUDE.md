@@ -3613,6 +3613,11 @@ que la integración continua pase. Lo que sigue depende de lo que toca:
 - **No toca ninguna:** entra con la integración continua en verde. La fusiona el agente
   cuando el cambio lo pidió Sergio; si lo propuso el agente por su cuenta, la deja
   propuesta.
+- **Los cobros tienen dueño** (decisión de Sergio del 2026-11-12): `src/services/billing/`, `src/adapters/stripe/`,
+  `src/app/api/webhooks/`, `src/app/api/trabajos/`, `src/app/planes/`, `src/app/suscripcion/` y
+  `src/messages/es/plans.ts` están en `.github/CODEOWNERS`, y con ellas `src/config/` (la guarda de las llaves de cobro) `vercel.json` (la agenda de los trabajos) y `src/domain/fiscal/` (los datos fiscales y de pago de los maestros). Antes no lo estaban, y una solicitud de cobros que no
+  tocara migraciones ni pruebas habría entrado sin su aprobación. La portada (`src/app/page.tsx`) no tiene dueño:
+  lee los precios por el servicio.
 - **Mientras dura el rediseño** (T-616; decisión de Sergio del 2026-11-11): los `.tsx` de `src/app/_catalog/`,
   `explorar/`, `inicio/` y `cursos/` no piden dueño, los de hoy y los nuevos (el bloque final de
   `.github/CODEOWNERS`; el párrafo de arriba las sigue listando con dueño, y para esos `.tsx` manda este). Una
