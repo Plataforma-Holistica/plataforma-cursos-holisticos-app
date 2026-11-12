@@ -140,7 +140,10 @@ test("FL-10: quien no ha empezado nada ve «Para empezar», «Nuevos», sus prá
   const window = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
-  await expect(starters.getByRole("link", { name: `${first.title}, con ${first.teacher}` }).getByText("Ver el curso")).toBeInViewport({ ratio: 1 });
+  // El texto a la vista del botón, exacto: el nombre que solo se lee también termina en «Ver el curso» (WCAG 2.5.3).
+  await expect(starters.getByRole("link", { name: `${first.title}, con ${first.teacher}` }).getByText("Ver el curso", { exact: true })).toBeInViewport({
+    ratio: 1,
+  });
   if (window !== null) await page.setViewportSize(window);
   await page.reload();
   // Cada práctica se alcanza desde el inicio. Cambió por el requisito (T-616, solicitud 3a): antes cada práctica era un carrusel con
