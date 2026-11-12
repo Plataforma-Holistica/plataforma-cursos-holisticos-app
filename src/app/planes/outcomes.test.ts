@@ -81,10 +81,14 @@ describe("PA-04, cifras y direcciones", () => {
 
   it("lo que equivale al mes del anual se redondea hacia arriba al centavo: nunca se anuncia menos que lo real", () => {
     // Cambió por el requisito (decisión de Sergio del 2026-11-12, T-616, solicitud 4b): antes era hacia abajo.
-    expect(monthlyEquivalent(2990)).toBe(250);
+    // Todo en centavos, y al centavo: nunca al peso.
+    // $2,990.00 al año son 249.1666 pesos al mes: $249.17 (el caso de Sergio, la semilla).
     expect(monthlyEquivalent(299000)).toBe(24917);
+    // $29.90 al año son 249.1666 centavos: suben a 250 centavos, $2.50.
+    expect(monthlyEquivalent(2990)).toBe(250);
+    // $3,490.00 al año: $290.84 (hacia abajo eran $290.83).
     expect(monthlyEquivalent(349000)).toBe(29084);
-    // Exacto: no sube.
+    // Exacto, no sube: $1,200.00 al año son $100.00 al mes.
     expect(monthlyEquivalent(120000)).toBe(10000);
     expect(monthlyEquivalent(12)).toBe(1);
   });
