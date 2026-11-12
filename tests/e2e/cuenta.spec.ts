@@ -148,7 +148,11 @@ test("solo con el teclado: se llega al campo, se guarda con Intro y el foco no s
   await openAccount(page, ana);
   await hydrated(page);
 
-  // El campo del nombre es lo primero a lo que se llega después del salto al contenido.
+  // El campo del nombre es lo primero a lo que se llega después del salto al contenido. La barra del alumno va antes
+  // (T-616): se toma el salto, como lo haría quien usa el teclado.
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("link", { name: "Saltar al contenido" })).toBeFocused();
+  await page.keyboard.press("Enter");
   for (let presses = 0; presses < 4; presses += 1) {
     await page.keyboard.press("Tab");
     if (await nameField(page).evaluate((field) => field === document.activeElement)) break;
