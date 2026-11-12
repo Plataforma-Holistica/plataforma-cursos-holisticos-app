@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -39,6 +39,17 @@ beforeEach(() => {
 });
 
 describe("PA-04", () => {
+  it("lo que incluye es una lista de lo que ya existe, sin prometer constancias (T-616, solicitud 4)", () => {
+    show(null);
+    const list = screen.getByRole("list", { name: "Con cualquiera de los dos planes:" });
+    expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "Todo el catálogo",
+      "Todos los maestros",
+      "Los recursos de cada curso",
+    ]);
+    expect(document.body.textContent).not.toMatch(/constancia/i);
+  });
+
   it("sin elegir: los dos planes con su precio e «IVA incluido», y sin formulario; sin fallas de accesibilidad", async () => {
     const { container } = show(null);
     expect(screen.getByRole("heading", { level: 3, name: "Mensual" })).toBeInTheDocument();

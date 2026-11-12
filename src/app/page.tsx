@@ -10,6 +10,7 @@ import { Button } from "@/ui/button";
 import { Carousel } from "@/ui/carousel";
 import { CourseCard } from "@/ui/course-card";
 import { CourseCover } from "@/ui/course-cover";
+import { FlowerMark } from "@/ui/flower";
 import { InlineAlert } from "@/ui/inline-alert";
 import portada from "@/ui/photos/portada-muelle.jpg";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
@@ -76,6 +77,11 @@ export default async function LandingPage() {
           <div className="relative mx-auto flex max-w-page flex-col items-start gap-6 px-4 pt-32 pb-20 sm:px-8 sm:pt-44 sm:pb-28">
             {/* El ancho de lectura se mide con la letra del cuerpo: medido en el titular, no lo partiría. */}
             <div className="flex max-w-reading flex-col gap-6">
+              {/* La flor de la casa, grande, sobre el titular (T-616, solicitud 4; pedido de Sergio del 2026-11-11:
+                  el logotipo, importante en toda página). Decorativa: el nombre ya lo dice la barra. */}
+              <span data-testid="portada-flor" aria-hidden="true">
+                <FlowerMark className="size-16 sm:size-20" />
+              </span>
               <h1 className="text-display-xl text-balance">
                 {text.hero.title}
               </h1>

@@ -11,6 +11,7 @@ import { InlineAlert } from "@/ui/inline-alert";
 import { TextLink } from "@/ui/text-link";
 
 import { startCheckoutAction } from "./actions";
+import { PlanIncludes } from "./includes";
 import { ACCEPT_FIELD, AMOUNT_FIELD, DOCUMENT_FIELD, PLAN_FIELD, RETURN_FIELD, type PlansAnswer, type PlansProblem, type PlansState } from "./outcomes";
 import { PAY_BLOCK_ID, type PlanCard, type PlanSummary, type PlansView } from "./view";
 
@@ -38,7 +39,7 @@ export function PlansScreen({ view }: { view: Ready }) {
     <div className="flex flex-col gap-10">
       <div className="flex max-w-reading flex-col gap-3">
         <h1 className="text-display-l text-balance">{text.title}</h1>
-        <p className="text-body-l text-text-2">{text.intro}</p>
+        <PlanIncludes />
       </div>
       {view.canceled && <InlineAlert tone="neutral">{text.canceled}</InlineAlert>}
       <section aria-labelledby="planes-elige" className="flex flex-col gap-4">

@@ -3,6 +3,7 @@
 import { ServerCrash } from "lucide";
 import { useEffect } from "react";
 
+import { BrandBar } from "@/app/_public/brand-bar";
 import { meta } from "@/messages/es/meta";
 import { states } from "@/messages/es/states";
 import { t } from "@/messages/format";
@@ -25,7 +26,9 @@ export default function ErrorPage({ error, retry }: { error: Error & { digest?: 
   useEffect(() => reportCaughtError(error), [error]);
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-none">
+    <>
+      <BrandBar />
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-none">
       {/* Esta página no puede declarar su título como las demás: se arma aquí, igual. */}
       <title>{t(meta.titleTemplate, { page: text.title })}</title>
       <FullScreenState
@@ -41,6 +44,7 @@ export default function ErrorPage({ error, retry }: { error: Error & { digest?: 
       >
         <p>{text.body}</p>
       </FullScreenState>
-    </main>
+      </main>
+    </>
   );
 }

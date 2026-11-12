@@ -13,12 +13,14 @@ export interface TextLinkProps {
   external?: boolean;
   children: ReactNode;
   className?: string;
+  /** Es la página en que se está (`aria-current="page"`), como «Planes» de la barra pública en los planes. */
+  current?: boolean;
 }
 
 const CLASSES =
   "text-accent underline underline-offset-4 transition-colors duration-(--duration-fast) ease-standard hover:text-accent-strong";
 
-export function TextLink({ href, external = false, children, className }: TextLinkProps) {
+export function TextLink({ href, external = false, children, className, current = false }: TextLinkProps) {
   if (external) {
     return (
       <a href={href} target="_blank" rel="noopener noreferrer" className={cx(CLASSES, className)}>
@@ -29,7 +31,7 @@ export function TextLink({ href, external = false, children, className }: TextLi
     );
   }
   return (
-    <Link href={href} className={cx(CLASSES, className)}>
+    <Link href={href} aria-current={current ? "page" : undefined} className={cx(CLASSES, className)}>
       {children}
     </Link>
   );

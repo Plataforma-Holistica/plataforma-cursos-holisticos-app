@@ -463,6 +463,15 @@ describe("la página de un texto legal", () => {
     ]);
   });
 
+  it("lleva arriba el logotipo, que lleva a la portada (T-616, solicitud 4)", async () => {
+    mocks.currentLegalText.mockResolvedValue({ kind: "found", text: { ...legalText, body: "Texto." } });
+    render(await legalPage("terminos"));
+    const bar = screen.getByRole("banner");
+    expect(within(bar).getByRole("link", { name: terms.Plataforma })).toHaveAttribute("href", "/");
+    // Solo el logotipo: quien lee un texto legal puede tener sesión, y no se le ofrece crear cuenta.
+    expect(within(bar).getAllByRole("link")).toHaveLength(1);
+  });
+
   it("un borrador lo dice", async () => {
     mocks.currentLegalText.mockResolvedValue({ kind: "found", text: { ...legalText, version: 0, body: "Texto." } });
     render(await legalPage("terminos"));

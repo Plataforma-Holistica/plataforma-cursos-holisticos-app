@@ -70,7 +70,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   return (
     <>
       {who.kind === "student" && <StudentNav />}
-      {who.kind === "visitor" && <PublicHeader />}
+      {who.kind === "visitor" && <PublicHeader onPlans />}
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className={cx("mx-auto flex max-w-page flex-col gap-10 px-4 pt-6 outline-none sm:px-8", who.kind === "student" ? "pb-24 sm:pb-16" : "pb-16")}>
         {view.kind === "not_for_sale" ? (
           <div className="flex max-w-reading flex-col gap-4">

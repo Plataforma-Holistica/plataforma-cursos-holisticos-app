@@ -5,8 +5,8 @@ import { Disclaimer } from "@/ui/disclaimer";
 import { TextLink } from "@/ui/text-link";
 import { Wordmark } from "@/ui/wordmark";
 
-// El pie del sitio público (`Footer`, diseño, sección 5; T-614, parte 2): los textos legales que ya
-// tienen página, «Entrar» y el deslinde. Comunidad, Reembolsos, Ayuda y Para maestros entran cuando
+// El pie del sitio público (`Footer`, diseño, sección 5; T-614, parte 2): los planes (T-616, solicitud 4), los
+// textos legales que ya tienen página, «Entrar» y el deslinde. Comunidad, Reembolsos, Ayuda y Para maestros entran cuando
 // existan sus pantallas (T-606). Una página que ya pinta el deslinde al final (las fichas) lo pide sin él
 // (`withDisclaimer`), para no decirlo dos veces.
 
@@ -24,6 +24,11 @@ export function PublicFooter({ withDisclaimer = true }: { withDisclaimer?: boole
         <Wordmark className="text-h3" />
         <nav aria-label={text.label}>
           <ul className="flex flex-wrap gap-x-6 text-body-s">
+            <li>
+              <TextLink href={ROUTES.plans} className="inline-flex min-h-touch items-center">
+                {text.plans}
+              </TextLink>
+            </li>
             {LEGAL.map(({ docType, label }) => {
               const slug = slugOfDocType(docType);
               return slug === null ? null : (

@@ -5,6 +5,7 @@ import { cache } from "react";
 
 import { longDate } from "@/app/_lib/dates";
 import { LegalBody } from "@/app/_lib/legal-body";
+import { BrandBar } from "@/app/_public/brand-bar";
 import { messages, t } from "@/messages";
 import { currentLegalText, docTypeOfSlug, legalBlocks } from "@/services/legal/texts";
 import { UnavailableScreen } from "@/app/(cuenta)/_lib/states";
@@ -59,7 +60,9 @@ export default async function LegalPage({ params, searchParams }: Props) {
 
   const found = read.text;
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-6 px-4 py-16 outline-none">
+    <>
+      <BrandBar />
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-6 px-4 py-16 outline-none">
       <div className="flex flex-col gap-2">
         <h1 className="text-h1">{found.title}</h1>
         <p className="text-body-s text-text-2">
@@ -68,6 +71,7 @@ export default async function LegalPage({ params, searchParams }: Props) {
       </div>
       {found.version === 0 && <InlineAlert tone="warning">{text.draft}</InlineAlert>}
       <LegalBody title={found.title} blocks={legalBlocks(found.body)} />
-    </main>
+      </main>
+    </>
   );
 }

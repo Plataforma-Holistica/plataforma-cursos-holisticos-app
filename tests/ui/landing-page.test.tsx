@@ -93,10 +93,16 @@ describe("la portada (PA-01)", () => {
     expect(photo).toHaveAttribute("sizes", "100vw");
   });
 
-  it("la barra lleva el logotipo a la portada, «Entrar» y «Crear cuenta»", async () => {
+  it("la barra lleva el logotipo a la portada, «Planes», «Entrar» y «Crear cuenta»", async () => {
     await renderPage();
     const bar = screen.getByRole("banner");
     expect(within(bar).getByRole("link", { name: terms.Plataforma })).toHaveAttribute("href", "/");
+    // Los planes antes de crear cuenta (pedido de Sergio del 2026-11-11). En el teléfono no caben con el
+    // logotipo y «Crear cuenta»: van en el pie, como «Entrar».
+    const plans = within(bar).getByRole("link", { name: landing.header.plans });
+    expect(plans).toHaveAttribute("href", "/planes");
+    expect(plans.closest("li")).toHaveClass("hidden", "sm:block");
+    expect(plans).not.toHaveAttribute("aria-current");
     expect(within(bar).getByRole("link", { name: landing.header.signIn })).toHaveAttribute("href", "/entrar");
     expect(within(bar).getByRole("link", { name: landing.header.signUp })).toHaveAttribute("href", "/registro");
     expect(within(bar).getByRole("navigation", { name: landing.header.label })).toBeInTheDocument();
@@ -144,12 +150,23 @@ describe("la portada (PA-01)", () => {
     expect(how.textContent).not.toMatch(/\$|MXN|\d/);
   });
 
-  it("ningún texto de la portada habla de precio ni de suscripción: todavía no existen", async () => {
+  it("el contenido de la portada todavía no habla de precio, de planes ni de suscripción; la barra y el pie enlazan a los planes", async () => {
+    // Cambió por el requisito (pedido de Sergio del 2026-11-11, RF-201): «Planes» va en la barra y en el pie.
+    // Los precios en la portada llegan con su sección, aparte (T-616, solicitud 4b).
     const open = course("abierto", { isOpen: true });
     mocks.homeShelf.mockResolvedValue({ kind: "ready", shelf: shelf([course("respirar")], open) });
     const container = await renderPage();
     // «Sin pagar» sí: es lo que el curso abierto ya hace.
-    expect(container.textContent).not.toMatch(/precio|suscri|\bplan(es)?\b/i);
+    expect(screen.getByRole("main").textContent).not.toMatch(/precio|suscri|\bplan(es)?\b/i);
+    expect(container.textContent).not.toMatch(/\$|MXN|precio|suscri/i);
+  });
+
+  it("la cabecera lleva la flor grande, decorativa, sobre el titular", async () => {
+    await renderPage();
+    const heading = screen.getByRole("heading", { level: 1 });
+    const flower = within(screen.getByRole("main")).getByTestId("portada-flor");
+    expect(flower).toHaveAttribute("aria-hidden", "true");
+    expect(flower.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("con curso abierto, el enlace del encabezado y su bloque llevan a su ficha", async () => {
@@ -190,6 +207,7 @@ describe("la portada (PA-01)", () => {
     const footer = screen.getByRole("contentinfo");
     expect(within(footer).getByRole("link", { name: landing.footer.terms })).toHaveAttribute("href", "/legal/terminos");
     expect(within(footer).getByRole("link", { name: landing.footer.privacy })).toHaveAttribute("href", "/legal/privacidad");
+    expect(within(footer).getByRole("link", { name: landing.footer.plans })).toHaveAttribute("href", "/planes");
     expect(footer.textContent).toContain("es educativa");
   });
 

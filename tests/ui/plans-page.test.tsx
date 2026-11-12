@@ -16,7 +16,7 @@ vi.mock("@/app/_lib/guard", () => ({ publicViewer: mocks.publicViewer }));
 vi.mock("@/services/billing/checkout-service", () => ({ planOffer: mocks.planOffer, planStanding: mocks.planStanding }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/app/_catalog/nav", () => ({ StudentNav: () => null }));
-vi.mock("@/app/_public/header", () => ({ PublicHeader: () => null }));
+vi.mock("@/app/_public/header", () => ({ PublicHeader: ({ onPlans }: { onPlans?: boolean }) => <p data-testid="barra-publica" data-on-plans={String(onPlans)} /> }));
 vi.mock("@/app/_public/footer", () => ({ PublicFooter: () => null }));
 vi.mock("@/app/planes/screen", () => ({ PlansScreen: () => <p>planes</p> }));
 
@@ -45,6 +45,13 @@ describe("PA-04, cuando no se venden planes", () => {
     expect(screen.getByText("Por ahora no se pueden contratar planes. Vuelve pronto.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Ya tengo cuenta" })).toHaveAttribute("href", `/entrar?volver=${encodeURIComponent("/planes")}`);
     expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
+  it("al visitante, la barra pública marca «Planes» como la página en que está (T-616, solicitud 4)", async () => {
+    mocks.publicViewer.mockResolvedValue({ kind: "visitor" });
+    mocks.planOffer.mockResolvedValue(NOT_FOR_SALE);
+    await page({});
+    expect(screen.getByTestId("barra-publica")).toHaveAttribute("data-on-plans", "true");
   });
 
   it("quien tiene sesión nunca es redirigido", async () => {
