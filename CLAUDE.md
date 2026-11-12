@@ -1303,6 +1303,24 @@ que no se ve leyendo un solo archivo:
   carril A del 2026-11-11), sin constancias hasta T-504. El pie se llama «Enlaces del sitio». Cambió por el requisito la prueba de la portada
   que prohibía «planes» en todo el documento. Decisiones mías sin confirmar: «Planes» en el pie en el teléfono, los nombres partidos, la flor
   de 64 y 80 px, y solo el logotipo en las pantallas sueltas. Para el A: nada que le toque.
+- **Lo que T-616 suma al carril B** (la 4b, los precios en la portada, sin migración; zona delicada, cobros solo de lectura;
+  decisiones de Sergio del 2026-11-12 por el carril A, con la revisión independiente del diseño). **La portada no lee la oferta
+  fresca:** lee la vitrina, `planShowcase` (`src/services/billing/showcase.ts`, pura, y su armado `showcase-service.ts`), que recuerda
+  lo leído 60 s y el «no se supo» 15 s (decisión del carril A sin confirmar), comparte la lectura en curso, nunca rechaza y reporta una
+  vez por lectura fallida (`plans_showcase_unavailable`). Contesta solo el plan, su total y la versión del texto del cobro recurrente.
+  Cada instancia guarda su copia: al entrar un precio programado, la portada puede mostrar el anterior hasta un minuto, y su enlace no
+  lleva el monto. `/planes`, PA-32 y la salida a pagar siguen con `planOffer`, fresco: si leyeran de la memoria, `changed` y
+  `refresh()` harían un ciclo. `tests/architecture/billing.test.ts` lo exige: la vitrina solo en su servicio y en la portada, nada de
+  `/planes`, `/suscripcion` ni una acción la nombra, la portada no nombra `planOffer`, y ningún texto de `src/messages/` escribe una
+  cifra de precio. **El texto de cada tarjeta es uno solo**, `planCardText` (`src/app/planes/view.ts`), que usan `/planes` y la portada;
+  `showcaseView` aplica el mismo criterio de «a la venta» que `plansView` (planes, texto del cobro recurrente y su página, por
+  `plansLegalHref` de `legal-href.ts`). **El equivalente mensual del anual se redondea hacia arriba, al centavo** (`monthlyEquivalent`,
+  decisión de Sergio: nunca anunciar menos), también en `/planes`. En la portada, con venta, el botón del encabezado dice «Suscribirme»
+  hacia `/planes` (si no, sigue «Crear cuenta»), y la sección de los planes va después de «Cómo funciona», con `PlanIncludes` y «Ver
+  planes»; sin venta no aparece, y si no se supo va sin cifras. La portada lee el catálogo y la vitrina a la par. Cambiaron por el
+  requisito el redondeo en `outcomes.test.ts` y `view.test.ts`, el botón del encabezado en la portada (pantalla y extremo a extremo) y la
+  prueba que prohibía cifras en ella. Decisión mía sin confirmar: sin venta, el encabezado sigue con «Crear cuenta». Para el A: la vitrina
+  vive en `src/services/billing/`, con dueño.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
