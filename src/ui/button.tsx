@@ -11,7 +11,7 @@ import { Spinner } from "./spinner";
 
 const VARIANTS = {
   /** La acción de la pantalla. En teléfono ocupa todo el ancho. */
-  primary: "w-full bg-text text-bg hover:bg-text-2 active:bg-text-2 sm:w-auto",
+  primary: "w-full bg-accent text-on-accent hover:bg-accent-strong active:bg-accent-strong sm:w-auto",
   secondary: "border border-border-control text-text hover:bg-surface-2 active:bg-surface-1",
   text: "text-accent underline-offset-4 hover:text-accent-strong hover:underline",
   /** Lo que no se deshace. Sin relleno. */

@@ -6,7 +6,7 @@ import { useActionState, useState } from "react";
 import { durationText } from "@/app/_lib/dates";
 import { account } from "@/messages/es/account";
 import { t } from "@/messages/format";
-import { ROUTES } from "@/services/account/navigation";
+import { ROUTES, signInPath } from "@/services/account/navigation";
 import { Button } from "@/ui/button";
 import { SPACE } from "@/ui/cx";
 import { FullScreenState } from "@/ui/full-screen-state";
@@ -33,6 +33,8 @@ export interface CheckMailScreenProps {
   lifetimeSeconds: number | null;
   /** La espera que le queda a «Reenviar» al pintar la página, o nulo. */
   wait: ResendWait | null;
+  /** A dónde iba quien se registró, ya validado, o nulo. */
+  returnTo?: string | null;
 }
 
 function Resend({ wait: initialWait }: { wait: ResendWait | null }) {
@@ -81,7 +83,7 @@ function Resend({ wait: initialWait }: { wait: ResendWait | null }) {
   );
 }
 
-export function CheckMailScreen({ email, lifetimeSeconds, wait }: CheckMailScreenProps) {
+export function CheckMailScreen({ email, lifetimeSeconds, wait, returnTo = null }: CheckMailScreenProps) {
   const lifetime = lifetimeSeconds === null ? "" : durationText(lifetimeSeconds);
 
   return (
@@ -94,7 +96,7 @@ export function CheckMailScreen({ email, lifetimeSeconds, wait }: CheckMailScree
           <p className="text-text-2">
             {text.alreadyBefore}
             {SPACE}
-            <TextLink href={ROUTES.signIn}>{text.alreadySignIn}</TextLink>
+            <TextLink href={signInPath(returnTo)}>{text.alreadySignIn}</TextLink>
             {SPACE}
             {text.alreadyJoin}
             {SPACE}

@@ -56,6 +56,8 @@ const onSurfaces: [string, [number, number, number, number], number][] = [
   ["text-3", [7.16, 6.59, 5.94, 5.12], AA_TEXT],
   ["accent", [12.24, 11.27, 10.16, 8.76], AA_TEXT],
   ["accent-strong", [14.29, 13.16, 11.86, 10.23], AA_TEXT],
+  // El oro apagado de los antetítulos sobre el fondo liso (T-616). Sobre una foto o un resplandor va el oro pleno.
+  ["accent-muted", [7.75, 7.14, 6.44, 5.55], AA_TEXT],
   ["success", [10.36, 9.54, 8.6, 7.41], AA_TEXT],
   ["warning", [9.18, 8.46, 7.63, 6.57], AA_TEXT],
   ["danger", [8.44, 7.77, 7.01, 6.04], AA_TEXT],
@@ -84,6 +86,16 @@ const pairs: [string, string, number, number][] = [
   ["text-2", "warning-bg", 9.32, AA_TEXT],
   ["text-2", "danger-bg", 9.7, AA_TEXT],
   ["accent", "surface-3", 8.76, AA_UI], // barra de progreso sobre su pista
+  // El texto de una portada «arte» (T-616) sobre el tono más claro de su degradado, sin velo: el peor caso. La
+  // práctica va arriba, donde cae el foco; el título va abajo, sobre un velo que solo lo oscurece más.
+  ["text", "art-1", 5.35, AA_TEXT],
+  ["text", "art-2", 4.93, AA_TEXT],
+  ["text", "art-3", 4.93, AA_TEXT],
+  ["text", "art-4", 5.53, AA_TEXT],
+  ["text", "art-5", 5.64, AA_TEXT],
+  ["text", "art-6", 5.2, AA_TEXT],
+  ["text", "art-7", 5.6, AA_TEXT],
+  ["text", "art-8", 5.39, AA_TEXT],
   // La caja del QR del segundo factor contra la página (T-616, 2b): su zona de silencio tiene que ser clara.
   ["qr-quiet", "bg", 18.94, AA_UI],
   // Paleta «papel», para correos y PDF.

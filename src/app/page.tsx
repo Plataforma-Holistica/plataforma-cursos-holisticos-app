@@ -46,6 +46,7 @@ function courseCard(course: ShelfCourse) {
   return (
     <CourseCard
       key={course.slug}
+      courseKey={course.slug}
       href={href}
       title={course.title}
       teacherName={course.teacherName}

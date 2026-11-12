@@ -2,12 +2,20 @@
 
 import { requestRegistration } from "@/app/_lib/mail-requests";
 import { cookieJar, requestOrigin } from "@/app/_lib/request-context";
-import { ROUTES } from "@/services/account/navigation";
+import { RETURN_PARAM, ROUTES } from "@/services/account/navigation";
 
 import { leaveFor } from "../_lib/exit";
 import { nextAttempt } from "../_lib/form-state";
 import { rememberRequest } from "../_lib/link-facts";
 import { checkEmailField, mailRequestOutcome, readEmailForm, type MailRequestState } from "../_lib/mail-request";
+
+/** Lo más que se lee del destino: lo mismo que al entrar. Lo que valga lo decide quien guarda la cookie. */
+const MAX_RETURN = 2_048;
+
+function readReturn(form: FormData): string {
+  const value = form.get(RETURN_PARAM);
+  return typeof value === "string" ? value.slice(0, MAX_RETURN) : "";
+}
 
 /**
  * Pedir el registro (FL-02; diseño PA-10). El servicio cuenta el intento, aplica los topes
@@ -30,7 +38,9 @@ export async function requestRegistrationAction(previous: MailRequestState, form
   if (outcome.kind !== "accepted") return { ...outcome, email, attempt };
 
   const jar = await cookieJar();
-  // El correo viaja a la pantalla siguiente en una cookie corta, no en la dirección.
-  await rememberRequest(jar, email);
+  // El correo viaja a la pantalla siguiente en una cookie corta, no en la dirección. Con él, a
+  // dónde iba (FL-04): se anota después de la respuesta y no la cambia, así que sigue sin
+  // depender de si ese correo tiene cuenta.
+  await rememberRequest(jar, email, readReturn(form));
   return leaveFor(jar, { to: ROUTES.verify, notice: null });
 }

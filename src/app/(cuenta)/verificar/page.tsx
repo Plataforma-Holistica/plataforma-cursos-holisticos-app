@@ -31,7 +31,13 @@ export default async function CheckMailPage() {
   const facts = await pendingRequestFacts(pending.sentAt);
   return (
     <AccessFrame>
-      <CheckMailScreen email={pending.email} lifetimeSeconds={facts?.lifetimeSeconds ?? null} wait={facts?.wait ?? null} />
+      <CheckMailScreen
+        email={pending.email}
+        lifetimeSeconds={facts?.lifetimeSeconds ?? null}
+        wait={facts?.wait ?? null}
+        // Quien ya tenía cuenta no recibe correo y entra desde aquí: sigue a donde iba (FL-04).
+        returnTo={pending.returnTo ?? null}
+      />
     </AccessFrame>
   );
 }

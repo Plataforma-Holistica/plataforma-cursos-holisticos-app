@@ -19,6 +19,8 @@ import { Icon } from "./icon";
 // sabe medir.
 
 const WIDTHS = {
+  // 4:5, la tarjeta de curso desde T-616: en el teléfono, poco más de la mitad para que asome la siguiente.
+  card: "w-7/12 sm:w-60",
   // 16:9: en el teléfono, 3/4 del ancho para que asome la siguiente.
   wide: "w-9/12 sm:w-72",
   // 2:3: un poco menos de la mitad.
@@ -35,7 +37,7 @@ export interface CarouselProps {
   children: ReactNode;
 }
 
-export function Carousel({ id, title, shape = "wide", action, children }: CarouselProps) {
+export function Carousel({ id, title, shape = "card", action, children }: CarouselProps) {
   const list = useRef<HTMLUListElement>(null);
   const [edges, setEdges] = useState<{ start: boolean; end: boolean } | null>(null);
 
@@ -73,7 +75,8 @@ export function Carousel({ id, title, shape = "wide", action, children }: Carous
     element.scrollBy({ left: direction * element.clientWidth * 0.9, behavior: reduced ? "auto" : "smooth" });
   };
 
-  const arrow = "absolute top-1/3 z-10 hidden size-touch -translate-y-1/2 items-center justify-center rounded-full bg-surface-3 text-text shadow-raised hover:bg-surface-2 aria-disabled:cursor-default aria-disabled:text-text-disabled md:flex";
+  // A la altura del centro de la portada: en la vertical (4:5) cae más abajo que en la de 16:9.
+  const arrow = "absolute z-10 hidden size-touch -translate-y-1/2 items-center justify-center rounded-full bg-surface-3 text-text shadow-raised hover:bg-surface-2 aria-disabled:cursor-default aria-disabled:text-text-disabled md:flex";
 
   return (
     <section aria-labelledby={id} className="flex flex-col gap-3">
@@ -91,7 +94,7 @@ export function Carousel({ id, title, shape = "wide", action, children }: Carous
             onFocus={() => setFocused(-1)}
             onBlur={() => setFocused(null)}
             aria-disabled={!shown(-1)}
-            className={cx(arrow, "left-2")}
+            className={cx(arrow, shape === "card" ? "top-2/5" : "top-1/3", "left-2")}
           >
             <Icon icon={ChevronLeft} size={24} label={t(ui.carousel.previous, { row: title })} />
           </button>
@@ -99,7 +102,9 @@ export function Carousel({ id, title, shape = "wide", action, children }: Carous
         <ul
           ref={list}
           aria-labelledby={id}
-          className="flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto px-4 pb-2 scrollbar-none sm:scroll-px-8 sm:px-8"
+          // Aire arriba (`pt-3`, devuelto con `-mt-3`): la lista desplaza en horizontal, y eso también recorta en
+          // vertical; sin él se cortaban la tarjeta que sube al pasar el cursor y el anillo de foco (T-616).
+          className="-mt-3 flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto px-4 pt-3 pb-2 scrollbar-none sm:scroll-px-8 sm:px-8"
         >
           {Children.toArray(children).map((child, index) => (
             // `toArray` ya quitó lo vacío y le dio a cada tarjeta su propia llave. `relative`: el
@@ -117,7 +122,7 @@ export function Carousel({ id, title, shape = "wide", action, children }: Carous
             onFocus={() => setFocused(1)}
             onBlur={() => setFocused(null)}
             aria-disabled={!shown(1)}
-            className={cx(arrow, "right-2")}
+            className={cx(arrow, shape === "card" ? "top-2/5" : "top-1/3", "right-2")}
           >
             <Icon icon={ChevronRight} size={24} label={t(ui.carousel.next, { row: title })} />
           </button>
