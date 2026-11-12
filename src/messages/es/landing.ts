@@ -2,14 +2,15 @@ import { defineMessages } from "../format";
 
 // Los textos de la portada pública (PA-01; T-614, parte 2) y de su barra y su pie.
 //
-// Lo que todavía no existe no se promete (decisiones de Sergio del 2026-11-05): sin la pantalla de
-// planes ni la suscripción, el botón dice «Crear cuenta» y lleva al registro, no hay precio ni
-// preguntas frecuentes, y ningún texto habla de precio ni de suscripción; sin constancias (T-504),
-// «Cómo funciona» no las menciona. Planes, Para maestros y Ayuda entran a la barra y al pie cuando
-// existan sus pantallas.
+// Lo que todavía no existe no se promete (decisiones de Sergio del 2026-11-05): el botón dice «Crear
+// cuenta» y lleva al registro, no hay preguntas frecuentes, y sin constancias (T-504) «Cómo funciona» no
+// las menciona. Desde T-616 (solicitud 4; pedido de Sergio del 2026-11-11: los planes antes de crear
+// cuenta) la barra y el pie enlazan a los planes; el precio en la portada llega con su sección (4b). Para
+// maestros y Ayuda entran cuando existan sus pantallas.
 export const landing = defineMessages({
   header: {
     label: "Principal",
+    plans: "Planes",
     signIn: "Entrar",
     signUp: "Crear cuenta",
   },
@@ -50,7 +51,8 @@ export const landing = defineMessages({
   empty: "Estamos preparando los primeros cursos.",
   unavailable: "No pudimos cargar los cursos. Inténtalo de nuevo en un momento.",
   footer: {
-    label: "Textos legales",
+    label: "Enlaces del sitio",
+    plans: "Planes",
     terms: "Términos y condiciones",
     privacy: "Aviso de privacidad",
   },

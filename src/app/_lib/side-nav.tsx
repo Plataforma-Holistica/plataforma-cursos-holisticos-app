@@ -136,8 +136,9 @@ export function SideFrame({
         className="relative border-b border-border lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-sidenav lg:shrink-0 lg:flex-col lg:gap-6 lg:overflow-y-auto lg:border-r lg:border-b-0 lg:p-4"
       >
         <div className="flex items-center justify-between gap-4 px-4 lg:px-3">
+          {/* El nombre se parte en dos renglones: con la flor (T-616), a su tamaño no cabe en la columna de 15.5rem y se cortaba. */}
           <Link href={home} className="inline-flex min-h-touch items-center text-h3">
-            <Wordmark />
+            <Wordmark wrap />
           </Link>
           <details className="lg:hidden">
             <summary className="summary-plain flex min-h-touch cursor-pointer items-center gap-2 text-body text-text">

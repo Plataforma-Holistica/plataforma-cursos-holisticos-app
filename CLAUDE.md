@@ -1288,21 +1288,41 @@ que no se ve leyendo un solo archivo:
   solo dentro del menú, arriba); «Ir a mi inicio» conserva su texto; el portal no ofrece «Administración» en su
   menú lateral (no lo pidió nadie, y cada pantalla del portal leería al equipo). Para el A: `AdminFrame` pide `portal`, y una pantalla del
   alumno nueva pinta `StudentNav` y entra a la lista de `screens.test.ts`.
+- **Lo que T-616 suma al carril B** (la 4a, «Planes» en la barra pública y el logotipo en toda página, sin migración; pedidos de
+  Sergio del 2026-11-11 viendo la aplicación sin sesión). `PublicHeader` lleva «Planes» entre el logotipo y «Entrar», marcado en `/planes`
+  (`onPlans`, que también pasa `PublicFooter`; `TextLink` ganó `current`, que pone `aria-current` y lo distingue a la vista: color del
+  texto, peso y subrayado grueso, en lugar de las clases de siempre). En el teléfono «Planes» va solo en el pie, y
+  el nombre del logotipo de la barra pública se parte en dos renglones (`max-sm:whitespace-normal`): con la flor, a 320 px «Crear cuenta» se
+  salía 41 px. En el menú lateral (`SideFrame`) el nombre se parte siempre (`Wordmark wrap`): a su tamaño no cabía en la columna y se cortaba.
+  **Dos clases de la misma propiedad en un elemento no las decide el orden del atributo sino el del CSS:** `FlowerMark` trae `size-brand-mark`
+  y `Wordmark` `whitespace-nowrap`, así que un `size-16` o un `whitespace-normal` sueltos no ganan; se pasan con variante (`max-sm:`, `sm:`) o
+  con la prop. `BrandBar` (`src/app/_public/brand-bar.tsx`), solo el logotipo hacia la portada, va arriba en los textos legales (también
+  cuando no se pudieron leer), la de no encontrado, la de error y `/planes` cuando no se sabe quién mira o la oferta no se pudo leer
+  (`plans-page.test.tsx` exige una sola barra en cada caso; `global-error.tsx` no la lleva, a propósito: trae su propio documento): la portada manda al inicio a quien tiene sesión, así que no pregunta quién
+  mira y el 404 sigue siendo el mismo para todos. La portada lleva la flor grande sobre el titular. En `/planes`, lo que incluye es una
+  lista única (`PlanIncludes`, `src/app/planes/includes.tsx`, «Cualquier plan incluye:», sin contar planes): solo lo que existe (decisión del
+  carril A del 2026-11-11), sin constancias hasta T-504. El pie se llama «Enlaces del sitio». Cambió por el requisito la prueba de la portada
+  que prohibía «planes» en todo el documento. Decisiones mías sin confirmar: «Planes» en el pie en el teléfono, los nombres partidos, la flor
+  de 64 y 80 px, y solo el logotipo en las pantallas sueltas. Para el A: nada que le toque.
 - **Lo que T-616 suma al carril B** (la 3a, el alumno en el lenguaje del rediseño, sin migración; plan en
   `~/.claude/plans/t616-sol3-plan.md`, sobre el prototipo de la dirección). **El inicio:** cabecera alta (`PageHeader`) con las estrellas fijas
   (`HOME_HEADER_PHOTO`; ya no alterna con el faro, que pasó a Explorar como `explorar-faro.jpg`), la fecha de antetítulo en
   `PRODUCT_TIME_ZONE` y «Entraste como…» bajo el saludo; el protagonista (`src/app/inicio/feature.tsx`): «Continuar viendo» o «Para
   empezar» con la portada grande a 6 de 12 columnas (fuera del teclado: todo es un solo enlace, y su nombre termina con lo que dice su botón,
   WCAG 2.5.3) y los demás en filas compactas, tres a la vista y el resto en un `<details>` cuya lista se nombra por su desplegable (un nombre
-  con el antetítulo haría que buscar «Continuar viendo» encontrara dos); las prácticas como fichas que llevan a explorar con su filtro; «Por
+  con el antetítulo haría que buscar «Continuar viendo» encontrara dos); las prácticas como fichas que llevan a explorar con su filtro (una fila que llega al tope del servicio, `ROW_LIMIT`, dice
+  «12 o más cursos»); «Por
   maestro» sin caja, con retratos de 120 px. Ya no hay un carrusel por práctica: FL-10 alcanza la práctica por su ficha. **Explorar:** rejilla
   de a lo más 5 columnas, buscador de `max-w-search` (720 px) con el envío dentro, fichas de práctica que son enlaces (la elegida viaja en un
-  campo oculto que va **después** del buscador: sin JavaScript, la dirección empieza por `q`) y maestro y nivel en selectores a la derecha.
+  campo oculto que va **después** del buscador: sin JavaScript, la dirección empieza por `q`) y maestro y nivel en selectores a la derecha. Con JavaScript, pulsar una ficha envía el formulario en ese momento con lo tecleado (sin él,
+  el enlace). Sin filtro, la rejilla se llama «Cursos por práctica» y, si alguna fila llegó al tope, lo dice debajo.
   **Mi lista:** el marcador es un icono en la esquina de la tarjeta (`variant="icon"`), y su aviso de error se ancla a la franja de la esquina
   (`CourseCard`, `left-2`) para caber en la tarjeta del teléfono; la lista vacía y el catálogo vacío, con `FlowerState`. **Las fichas de curso y
   de maestro**, con la cabecera de la portada, la filigrana y el resplandor; el temario con la roseta por lección (`LessonRow rosette`).
-  `PaywallState` (`src/app/_catalog/paywall-state.tsx`) existe y lo pinta la lección en la 3b. Los carriles que se deslizan llevan `-mt-3
-  pt-3`, como `Carousel`, para no recortar el anillo de foco, y lo que lleva `shadow-raised` y toma el foco suma `focus-visible:shadow-focus`.
+  `PaywallState` (`src/app/_catalog/paywall-state.tsx`) existe y lo pinta la lección en la 3b. En el teléfono la cabecera del inicio es más baja y la portada del
+  protagonista más corta, para que su botón quepa en 390×844 (FL-10 lo afirma con `toBeInViewport`); la portada lleva al centro reproducir o
+  la roseta. Los carriles que se deslizan llevan `-mt-3
+  pt-3` y `scroll-px-4`, como `Carousel`, para no recortar el anillo de foco, y lo que lleva `shadow-raised` y toma el foco suma `focus-visible:shadow-focus`.
   Cambiaron en `src/ui/`, con props opcionales: `CourseArt` (`largeMotif`), `CourseCard` (la línea de datos sin la práctica, también en la
   portada), `LessonRow` (`rosette`), `FlowerState` (`size="compact"`), `TeacherCard` redondo a 120 px, `PageHeader` alto, `buttonLook()` y el
   token `--container-search`. Cambiaron por el requisito unas quince pruebas de pantalla del inicio y de Explorar, y en extremo a extremo FL-10
