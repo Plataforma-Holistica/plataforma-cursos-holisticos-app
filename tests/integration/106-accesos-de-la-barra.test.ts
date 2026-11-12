@@ -141,6 +141,24 @@ describe("los accesos de la barra, contra la base", () => {
     });
   });
 
+  it("la misma persona del equipo ve «Administración» sin factor atado, y deja de verla al recibir el restablecimiento", async () => {
+    const mia = await person();
+    await reverted(async (owner) => {
+      await capability(owner, mia);
+      // Antes: capacidad y sin factor, `unbound`.
+      expect(await accessOf(owner, mia)).toEqual({ admin: true, portal: false });
+      await asSystem(owner);
+      await owner.query(
+        `insert into private.admin_invitations (kind, email, profile_id, capabilities, handoff, created_at, expires_at)
+         values ('rebind', $1, $2, '{}', $3, clock_timestamp(), clock_timestamp() + interval '1 day')`,
+        [mia.email.toLowerCase(), mia.id, "b".repeat(64)],
+      );
+      await asOwner(owner);
+      // Después: su camino es el correo.
+      expect(await accessOf(owner, mia)).toEqual({ admin: false, portal: false });
+    });
+  });
+
   it("una invitación al equipo para quien no es del equipo no lo ve", async () => {
     const lia = await person();
     await reverted(async (owner) => {

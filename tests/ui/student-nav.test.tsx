@@ -56,10 +56,12 @@ describe("la barra del alumno", () => {
     expect(logo?.querySelector("[data-brand-mark]")).not.toBeNull();
   });
 
-  it("va fija arriba, y las dos se retiran con el reproductor a pantalla completa", () => {
+  it("va fija arriba desde lg, por encima de lo que se pega, y las dos se retiran con el reproductor a pantalla completa", () => {
     bar();
     const banner = screen.getByRole("banner");
-    expect(banner).toHaveClass("sticky", "top-0", "student-top-bar");
+    // Más angosto, el buscador de Explorar y el reproductor se pegan arriba ellos (revisión del diff de la 146).
+    expect(banner).toHaveClass("lg:sticky", "lg:top-0", "student-top-bar", "relative", "z-(--z-dropdown)");
+    expect(banner).not.toHaveClass("sticky");
     expect(principal()).toHaveClass("student-bottom-bar", "fixed");
     expect(banner).toHaveAttribute("data-student-nav");
   });
@@ -84,7 +86,8 @@ describe("la barra del alumno", () => {
     for (const href of hrefs) {
       const [wide, narrow] = [...screen.getByRole("banner").querySelectorAll(`a[href="${href}"]`)];
       expect(wide?.closest("details")).toBeNull();
-      expect(wide).toHaveClass("hidden", "sm:inline-flex");
+      // En computadora, aparte del menú de la persona, tras un filete tenue.
+      expect(wide?.closest("[data-role-access]")).toHaveClass("hidden", "sm:flex", "border-r", "border-edge-ring");
       // En el menú van primero, antes de Cuenta, como botones con su icono, y solo en el teléfono.
       expect(narrow?.closest("details")).toBe(menu());
       expect(narrow?.closest("li")).toHaveClass("sm:hidden");
@@ -95,10 +98,14 @@ describe("la barra del alumno", () => {
     expect(menuLinks.slice(hrefs.length)).toEqual(["/cuenta", "/cuenta/comentarios"]);
   });
 
-  it("el menú dice con qué correo se entró, y lleva Cuenta, Mis comentarios y Cerrar sesión", () => {
+  it("el menú lleva el correo con que se entró, Cuenta, Mis comentarios y Cerrar sesión", () => {
     bar();
     const details = menu();
-    expect(within(details).getByText(`Entraste como ${EMAIL}.`, { exact: true })).toBeInTheDocument();
+    // Solo el correo, en una línea: «Entraste como» va a la vista bajo el saludo del inicio (03).
+    const email = within(details).getByText(EMAIL, { exact: true });
+    expect(email).toHaveClass("truncate", "text-text-3");
+    expect(email).toHaveAttribute("title", EMAIL);
+    expect(within(details).queryByText(/Entraste como/)).toBeNull();
     expect(within(details).getByRole("link", { name: "Cuenta", hidden: true })).toHaveAttribute("href", "/cuenta");
     expect(within(details).getByRole("link", { name: "Mis comentarios", hidden: true })).toHaveAttribute("href", "/cuenta/comentarios");
     expect(within(details).getByRole("button", { name: "Cerrar sesión", hidden: true }).closest("form")).not.toBeNull();
@@ -106,7 +113,23 @@ describe("la barra del alumno", () => {
 
   it("sin correo, el menú no inventa uno", () => {
     render(<StudentNav access={NO_NAV_ACCESS} email={null} />);
-    expect(screen.queryByText(/Entraste como/)).toBeNull();
+    expect(screen.queryByText(/@/)).toBeNull();
+    expect(screen.getByRole("banner").querySelector("details [title]")).toBeNull();
+  });
+
+  it("«Mi lista» va por el enrutador y le avisa al bloque que se llegó a él", async () => {
+    const user = userEvent.setup();
+    const arrivals = vi.fn();
+    window.addEventListener("mi-lista:llegada", arrivals);
+    bar();
+    await user.click(within(principal()).getByRole("link", { name: "Mi lista" }));
+    expect(arrivals).toHaveBeenCalledTimes(1);
+    window.removeEventListener("mi-lista:llegada", arrivals);
+  });
+
+  it("los resúmenes no llevan el triángulo, tampoco en WebKit", () => {
+    bar();
+    expect(menu().querySelector("summary")).toHaveClass("summary-plain");
   });
 
   it("es un solo <details>, sin el papel de menú de las aplicaciones", () => {

@@ -39,15 +39,19 @@ test("la alumna ve la barra en el inicio, explorar, la cuenta y sus comentarios,
   expect(admin?.status()).toBe(404);
 });
 
-test("la barra se queda arriba al desplazar, y el menú dice con qué correo se entró", async ({ page }) => {
+test("en computadora la barra se queda arriba al desplazar, y el menú lleva el correo con que se entró", async ({ page }) => {
   const ana = await person();
   await signIn(page, ana);
+  // La cuenta es más alta que la ventana: sí se desplaza.
+  await page.setViewportSize({ width: 1280, height: 500 });
+  await page.goto("/cuenta");
   await hydrated(page);
   await page.mouse.wheel(0, 2000);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(100);
   await expect.poll(() => bar(page).evaluate((element) => element.getBoundingClientRect().top)).toBe(0);
   await openPersonMenu(page);
   const menu = bar(page).locator("details");
-  await expect(menu.getByText(`Entraste como ${ana.email}.`)).toBeVisible();
+  await expect(menu.getByText(ana.email, { exact: true })).toBeVisible();
   await expect(menu.getByRole("link", { name: "Mis comentarios" })).toBeVisible();
   expect(await a11yViolations(page)).toEqual([]);
   // Escape lo cierra y el foco vuelve a «Tu cuenta».
@@ -70,6 +74,35 @@ test("desde la cuenta se vuelve por la barra, y «Mi lista» lleva a su bloque d
   await expect(page).toHaveURL(/\/explorar/);
 });
 
+test("«Mi lista» desde el mismo inicio: llega al bloque, y «Atrás» después de otra pantalla vuelve al inicio @telefono", async ({ page }) => {
+  const ana = await person();
+  await signIn(page, ana);
+  await hydrated(page);
+  const principal = page.getByRole("navigation", { name: "Principal" });
+  await principal.getByRole("link", { name: "Mi lista" }).click();
+  await expect(page).toHaveURL("/inicio#bloque-mi-lista");
+  await expect(page.getByText(/Todavía no guardas ningún curso/)).toBeVisible();
+  await expect(page.locator("#bloque-mi-lista")).toBeFocused();
+  await principal.getByRole("link", { name: "Explorar" }).click();
+  await expect(page).toHaveURL(/\/explorar/);
+  await expect(page.getByRole("heading", { level: 1, name: "Explorar" })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL("/inicio#bloque-mi-lista");
+  await expect(page.getByRole("heading", { level: 1, name: /^Hola/ })).toBeVisible();
+});
+
+test("en el teléfono, en Explorar, el buscador pegado no tapa el menú de la persona @telefono", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 740 });
+  const ana = await person();
+  await signIn(page, ana);
+  await page.goto("/explorar");
+  await hydrated(page);
+  await openPersonMenu(page);
+  // Pulsar falla si otra cosa recibe el clic encima del enlace.
+  await bar(page).locator("details").getByRole("link", { name: "Mis comentarios" }).click();
+  await expect(page).toHaveURL("/cuenta/comentarios");
+});
+
 for (const width of [390, 320]) {
   test(`a ${width} px de ancho no hay desplazamiento a los lados, y el menú cabe @telefono`, async ({ page }) => {
     await page.setViewportSize({ width, height: 740 });
@@ -80,6 +113,12 @@ for (const width of [390, 320]) {
     const box = await bar(page).locator("details > div").boundingBox();
     expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
     expect((box?.x ?? 0) + (box?.width ?? Infinity)).toBeLessThanOrEqual(width);
+    // La lista de abajo es fija: salirse no daría desplazamiento. Cada enlace dentro de la ventana.
+    for (const link of await page.getByRole("navigation", { name: "Principal" }).getByRole("link").all()) {
+      const each = await link.boundingBox();
+      expect(each?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect((each?.x ?? 0) + (each?.width ?? Infinity)).toBeLessThanOrEqual(width);
+    }
   });
 }
 

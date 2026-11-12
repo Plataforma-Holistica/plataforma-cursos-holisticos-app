@@ -140,7 +140,7 @@ export function SideFrame({
             <Wordmark />
           </Link>
           <details className="lg:hidden">
-            <summary className="flex min-h-touch cursor-pointer list-none items-center gap-2 text-body text-text">
+            <summary className="summary-plain flex min-h-touch cursor-pointer items-center gap-2 text-body text-text">
               <Icon icon={Menu} />
               {text.menu}
             </summary>

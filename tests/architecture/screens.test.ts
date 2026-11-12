@@ -1020,7 +1020,8 @@ describe("la barra del alumno y sus accesos por rol", () => {
     // Con el resguardo nulo: la barra no depende de la cookie del buzón, y una invitación nunca da un acceso.
     const records = everything.find((source) => source.file === "src/services/account/team-records.ts")?.code ?? "";
     const reading = records.slice(records.indexOf("export async function readNavStates"));
-    expect(reading).toMatch(/^export async function readNavStates\(tx: Tx\): Promise<NavStates> \{\s+const team = await readTeamStanding\(tx, null\);\s+const teacher = await readTeacherStanding\(tx, null\);/);
+    expect(reading).toMatch(/^export async function readNavStates\(tx: Tx\): Promise<NavStates> \{\s+const team = await readTeamStanding\(tx, null\)\.then\(/);
+    expect(reading).toMatch(/const teacher = await readTeacherStanding\(tx, null\)\.then\(/);
   });
 
   it("nunca pasan por una memoria", () => {

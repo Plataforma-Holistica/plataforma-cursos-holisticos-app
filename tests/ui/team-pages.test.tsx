@@ -16,12 +16,13 @@ const mocks = vi.hoisted(() => ({
   sessionEmail: vi.fn(),
   teacherStanding: vi.fn(() => Promise.resolve({ kind: "teacher", claims: {}, standing: { state: "none" } })),
   billingQueueCount: vi.fn((): Promise<{ kind: string; count?: number }> => Promise.resolve({ kind: "none" })),
+  navAccess: vi.fn(() => Promise.resolve({ admin: true, portal: false })),
   notFound: vi.fn((): never => {
     throw new Error("no encontrado");
   }),
 }));
 // El menú de administración (T-616): a quien no es maestro, sin «Mi portal».
-vi.mock("@/services/account/nav", () => ({ navAccess: () => Promise.resolve({ admin: true, portal: false }) }));
+vi.mock("@/services/account/nav", () => ({ navAccess: mocks.navAccess }));
 vi.mock("@/app/_lib/guard", () => ({
   requireAdmin: mocks.requireAdmin,
   requireSecondFactor: mocks.requireSecondFactor,
@@ -263,6 +264,21 @@ describe("el marco de las secciones (T-614, parte 6)", () => {
     expect(answer.props.path).toBe("/admin/periodos/2027-10/cierre");
     expect(answer.props.capabilities).toEqual(["finance", "content"]);
     expect((answer.props.children.type as { name: string }).name).toBe("CloseSection");
+    expect(answer.props).toMatchObject({ portal: false });
+  });
+
+  it.each([true, false])("el comodín le pasa al marco si también es maestro (%s), leído con las claims de la guarda (T-616)", async (portal) => {
+    mocks.requireAdmin.mockResolvedValue({ kind: "render", claims, capabilities: ["finance"] });
+    mocks.navAccess.mockResolvedValueOnce({ admin: true, portal });
+    const answer = (await AdminRestPage(rest("periodos"))) as ReactElement<{ portal: boolean }>;
+    expect(answer.props.portal).toBe(portal);
+    expect(mocks.navAccess).toHaveBeenCalledWith(claims);
+  });
+
+  it("si la guarda no deja pasar, el comodín no pregunta por los accesos", async () => {
+    mocks.requireAdmin.mockResolvedValue({ kind: "unavailable" });
+    render(await AdminRestPage(rest("periodos")));
+    expect(mocks.navAccess).not.toHaveBeenCalled();
   });
 
   it.each([

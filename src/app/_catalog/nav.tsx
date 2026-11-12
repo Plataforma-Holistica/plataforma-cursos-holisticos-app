@@ -3,12 +3,13 @@ import Link from "next/link";
 
 import { signOutAction } from "@/app/(cuenta)/_lib/session-actions";
 import type { NavAccess } from "@/services/account/nav-access";
-import { messages, t } from "@/messages";
+import { messages } from "@/messages";
 import { ROUTES } from "@/services/account/navigation";
 import { cx } from "@/ui/cx";
 import { Icon } from "@/ui/icon";
 import { Wordmark } from "@/ui/wordmark";
 
+import { MyListLink } from "./my-list-link";
 import { PersonMenu } from "./person-menu";
 
 // La barra del alumno, una sola en todas sus pantallas (diseño, sección 5; T-210; T-616, solicitud 2, por las
@@ -26,11 +27,11 @@ import { PersonMenu } from "./person-menu";
 const text = messages.browse.nav;
 
 const LINKS = [
-  { href: ROUTES.home, label: text.home, icon: House, narrowOnly: false, native: false },
-  { href: ROUTES.explore, label: text.explore, icon: Compass, narrowOnly: false, native: false },
-  // Un ancla del navegador y no del enrutador: así el bloque queda como `:target` y oye `hashchange`.
-  { href: ROUTES.myList, label: text.myList, icon: Heart, narrowOnly: false, native: true },
-  { href: ROUTES.account, label: text.account, icon: UserRound, narrowOnly: true, native: false },
+  { href: ROUTES.home, label: text.home, icon: House, narrowOnly: false },
+  { href: ROUTES.explore, label: text.explore, icon: Compass, narrowOnly: false },
+  // Le avisa al bloque del inicio que se llegó a él (`MyListLink`).
+  { href: ROUTES.myList, label: text.myList, icon: Heart, narrowOnly: false },
+  { href: ROUTES.account, label: text.account, icon: UserRound, narrowOnly: true },
 ] as const;
 
 type Current = typeof ROUTES.home | typeof ROUTES.explore | typeof ROUTES.account;
@@ -45,9 +46,14 @@ const ENTRY = "flex min-h-touch w-full items-center gap-3 rounded-md px-3 text-b
 export function StudentNav({ current, access, email }: { current?: Current; access: NavAccess; email: string | null }) {
   const shown = ACCESSES.filter((entry) => access[entry.key]);
   return (
-    // El desenfoque va solo desde `sm`: un `backdrop-filter` vuelve a la barra el marco de lo fijo, y la lista de
-    // abajo del teléfono quedaría pegada a ella y no a la ventana.
-    <header data-student-nav className="student-top-bar sticky top-0 z-(--z-sticky) border-b border-border bg-bg sm:float-plane">
+    // Fija arriba desde `lg`: más angosto, el buscador de Explorar y el reproductor de la lección se pegan arriba ellos,
+    // y la lista de abajo ya da el camino. Por encima de lo pegado (`z-dropdown`), para que el menú abierto no quede
+    // debajo. El desenfoque va solo desde `sm`: un `backdrop-filter` vuelve a la barra el marco de lo fijo, y la lista
+    // de abajo del teléfono quedaría pegada a ella y no a la ventana.
+    <header
+      data-student-nav
+      className="student-top-bar relative z-(--z-dropdown) border-b border-border bg-bg sm:float-plane lg:sticky lg:top-0"
+    >
       <div className="mx-auto flex max-w-page items-center gap-6 px-4 py-3 sm:px-8">
         <Link href={ROUTES.home} className="inline-flex min-h-touch items-center text-h3">
           <Wordmark />
@@ -58,47 +64,65 @@ export function StudentNav({ current, access, email }: { current?: Current; acce
         >
           <ul className="flex justify-around sm:justify-start sm:gap-2">
             {LINKS.map((link) => {
-              const Anchor = link.native ? "a" : Link;
+              const className = cx(
+                "flex min-h-touch flex-col items-center justify-center gap-1 px-4 py-2 text-caption text-text-2 hover:text-text sm:flex-row sm:text-body",
+                current === link.href && "text-text sm:underline sm:underline-offset-8",
+              );
+              const content = (
+                <>
+                  <Icon icon={link.icon} className="sm:hidden" />
+                  {link.label}
+                </>
+              );
               return (
                 <li key={link.href} className={cx(link.narrowOnly && "sm:hidden")}>
-                  <Anchor
-                    href={link.href}
-                    aria-current={current === link.href ? "page" : undefined}
-                    className={cx(
-                      "flex min-h-touch flex-col items-center justify-center gap-1 px-4 py-2 text-caption text-text-2 hover:text-text sm:flex-row sm:text-body",
-                      current === link.href && "text-text sm:underline sm:underline-offset-8",
-                    )}
-                  >
-                    <Icon icon={link.icon} className="sm:hidden" />
-                    {link.label}
-                  </Anchor>
+                  {link.href === ROUTES.myList ? (
+                    <MyListLink href={link.href} className={className}>
+                      {content}
+                    </MyListLink>
+                  ) : (
+                    <Link href={link.href} aria-current={current === link.href ? "page" : undefined} className={className}>
+                      {content}
+                    </Link>
+                  )}
                 </li>
               );
             })}
           </ul>
         </nav>
         <div className="ml-auto flex items-center gap-2">
-          {shown.map((entry) => (
-            <Link
-              key={entry.key}
-              href={entry.href}
-              className="hidden min-h-touch items-center gap-2 rounded-md px-3 text-body text-text-2 hover:bg-surface-2 hover:text-text sm:inline-flex"
-            >
-              <Icon icon={entry.icon} />
-              {entry.label}
-            </Link>
-          ))}
+          {/* En computadora, los accesos por rol aparte del menú de la persona, tras un filete tenue. */}
+          {shown.length > 0 && (
+            <div data-role-access className="mr-2 hidden items-center gap-2 border-r border-edge-ring pr-4 sm:flex">
+              {shown.map((entry) => (
+                <Link
+                  key={entry.key}
+                  href={entry.href}
+                  className="inline-flex min-h-touch items-center gap-2 rounded-md px-3 text-body text-text-2 hover:bg-surface-2 hover:text-text"
+                >
+                  <Icon icon={entry.icon} />
+                  {entry.label}
+                </Link>
+              ))}
+            </div>
+          )}
           <PersonMenu
             className="relative"
             summary={
-              <summary className="flex min-h-touch cursor-pointer list-none items-center gap-2 rounded-md px-3 text-body text-text hover:bg-surface-2">
+              <summary className="summary-plain flex min-h-touch cursor-pointer items-center gap-2 rounded-md px-3 text-body text-text hover:bg-surface-2">
                 <Icon icon={UserRound} />
                 <span className="max-sm:sr-only">{text.menu}</span>
               </summary>
             }
           >
             <div className="absolute right-0 top-full z-(--z-dropdown) mt-2 flex w-72 flex-col gap-1 rounded-lg border border-border bg-surface-1 p-2 shadow-raised">
-              {email !== null && <p className="px-3 py-2 text-body-s break-words text-text-2">{t(messages.account.home.signedInAs, { email })}</p>}
+              {/* Solo el correo: «Entraste como» va a la vista bajo el saludo del inicio (03, «Con qué cuenta se entró»).
+                  En una línea; el recorte es solo visual, y el correo completo va en `title`. */}
+              {email !== null && (
+                <p className="truncate px-3 py-2 text-body-s text-text-3" title={email}>
+                  {email}
+                </p>
+              )}
               <ul className="flex flex-col gap-1">
                 {shown.map((entry) => (
                   <li key={entry.key} className="sm:hidden">

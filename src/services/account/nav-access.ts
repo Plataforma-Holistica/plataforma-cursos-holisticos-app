@@ -11,10 +11,10 @@ import type { FailureCode } from "@/services/error-reporting/server";
 
 export { NO_NAV_ACCESS, opensPortal, type NavAccess } from "@/domain/access/nav-access";
 
-/** Los dos estados de quien actúa, leídos en una sola transacción como el servidor. */
+/** Los dos estados de quien actúa, leídos en una sola transacción como el servidor. Nulo, el que no se supo. */
 export interface NavStates {
-  team: TeamNavState;
-  teacher: TeacherNavState;
+  team: TeamNavState | null;
+  teacher: TeacherNavState | null;
 }
 
 export interface NavAccessDeps {
@@ -31,6 +31,8 @@ export function createNavAccess({ read, report }: NavAccessDeps) {
       await report("nav_access_unavailable");
       return NO_NAV_ACCESS;
     }
+    // Una mitad que no se supo no abre nada, y no le quita a la otra lo suyo.
+    if (states.team === null || states.teacher === null) await report("nav_access_unavailable");
     return navAccessOf(states.team, states.teacher);
   };
 }

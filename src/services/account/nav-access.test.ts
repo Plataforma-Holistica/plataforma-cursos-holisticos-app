@@ -42,6 +42,15 @@ describe("navAccess", () => {
     expect(reported).toEqual(["nav_access_unavailable"]);
   });
 
+  it("si una mitad no se supo, esa no abre nada, la otra conserva lo suyo, y se reporta", async () => {
+    const team = setup(() => Promise.resolve({ team: null, teacher: "active" }));
+    expect(await team.navAccess(claims)).toEqual({ admin: false, portal: true });
+    expect(team.reported).toEqual(["nav_access_unavailable"]);
+    const teacher = setup(() => Promise.resolve({ team: "member", teacher: null }));
+    expect(await teacher.navAccess(claims)).toEqual({ admin: true, portal: false });
+    expect(teacher.reported).toEqual(["nav_access_unavailable"]);
+  });
+
   it("cada llamada lee otra vez: no recuerda lo de nadie", async () => {
     const answers: NavStates[] = [
       { team: "member", teacher: "none" },

@@ -7,9 +7,11 @@ import { t } from "@/messages/format";
 import { Button } from "@/ui/button";
 import { Carousel } from "@/ui/carousel";
 import { CourseCard } from "@/ui/course-card";
+import { cx } from "@/ui/cx";
 import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 
+import { MY_LIST_ARRIVAL } from "./arrival";
 import type { ListState } from "./outcomes";
 
 // El carrusel «Mi lista» del inicio (PA-20; RF-311; T-210): los cursos guardados, lo último
@@ -24,7 +26,8 @@ import type { ListState } from "./outcomes";
 // se dice en una región que existe desde antes y no se va con el carrusel.
 //
 // «Mi lista» de la barra del alumno lleva a este bloque por su ancla (T-616): al llegar toma el foco, y si no
-// hay nada guardado lo dice, solo ahí (`:target`): el inicio sin nada guardado sigue sin «Mi lista».
+// hay nada guardado lo dice, solo entonces: el inicio sin nada guardado sigue sin «Mi lista». La llegada la avisa
+// el enlace (`MY_LIST_ARRIVAL`), o la trae la dirección al montarse; sin JavaScript, la nota sale por `:target`.
 
 const text = browse.myList;
 const IDLE: ListState = { kind: "idle" };
@@ -107,21 +110,36 @@ export function MyListBlock({ action, courses, permalink, id }: MyListBlockProps
     (next ?? document.getElementById(MAIN_CONTENT_ID))?.focus();
   }, [state, courses, pending]);
 
-  // Al llegar por el ancla, desde otra pantalla o desde el mismo inicio. El navegador ya desplazó.
+  // Si se llegó por «Mi lista» de la barra: se dice que no hay nada guardado.
+  const [arrived, setArrived] = useState(false);
+
+  // Al llegar por el ancla, desde otra pantalla (la dirección la trae al montarse) o desde el mismo inicio (lo avisa el
+  // enlace, antes de que el enrutador desplace: el foco espera un cuadro y no desplaza).
   useEffect(() => {
-    const arrive = () => {
-      if (window.location.hash === `#${id}`) block.current?.focus({ preventScroll: true });
+    const focus = () => {
+      setArrived(true);
+      requestAnimationFrame(() => block.current?.focus({ preventScroll: true }));
     };
-    arrive();
-    window.addEventListener("hashchange", arrive);
-    return () => window.removeEventListener("hashchange", arrive);
+    const fromAddress = () => {
+      if (window.location.hash === `#${id}`) focus();
+    };
+    fromAddress();
+    window.addEventListener(MY_LIST_ARRIVAL, focus);
+    window.addEventListener("hashchange", fromAddress);
+    return () => {
+      window.removeEventListener(MY_LIST_ARRIVAL, focus);
+      window.removeEventListener("hashchange", fromAddress);
+    };
   }, [id]);
 
   const answer = !pending && state.kind !== "idle" ? state.kind : null;
 
   return (
-    <div id={id} ref={block} tabIndex={-1} className="group flex flex-col gap-3 outline-none">
-      {courses.length === 0 && <p className="hidden px-4 text-body text-text-2 group-target:block sm:px-8">{text.emptyHere}</p>}
+    // Un grupo con nombre: las tarjetas usan el suyo sin nombre (`group-hover`), y este las encendería todas a la vez.
+    <div id={id} ref={block} tabIndex={-1} className="group/lista flex flex-col gap-3 outline-none">
+      {courses.length === 0 && (
+        <p className={cx("px-4 text-body text-text-2 sm:px-8", arrived ? "block" : "hidden group-target/lista:block")}>{text.emptyHere}</p>
+      )}
       {courses.length > 0 && (
         <form ref={form} action={formAction} onSubmit={onSubmit}>
           <Carousel id="mi-lista" title={text.title}>

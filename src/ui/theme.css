@@ -170,6 +170,8 @@
   --color-focus: var(--focus);
   --color-accent-muted: var(--accent-muted);
   --color-float: var(--float);
+  /* El contorno apenas visible, también como filete (T-616: entre los accesos por rol y el menú de la persona). */
+  --color-edge-ring: var(--edge-ring);
   --color-filigree: var(--filigree);
   --color-success: var(--success);
   --color-success-bg: var(--success-bg);
@@ -589,6 +591,13 @@
 /* La barra de arriba del alumno, fija al desplazar (T-616): se retira igual, para no quedar sobre el video. */
 @utility student-top-bar {
   :where(.player-locked) & {
+    display: none;
+  }
+}
+/* El resumen de un `<details>` sin su triángulo, también en WebKit, que no lo quita con `list-style`. */
+@utility summary-plain {
+  list-style: none;
+  &::-webkit-details-marker {
     display: none;
   }
 }
