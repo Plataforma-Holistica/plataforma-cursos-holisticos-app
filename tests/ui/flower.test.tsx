@@ -134,6 +134,11 @@ describe("la cabecera de pantalla (T-616)", () => {
     // En la columna de la cabecera, lo de arriba no se estira: el enlace mide su texto y no toda la fila.
     expect(back.parentElement).toHaveClass("self-start");
   });
+
+  it.each([[false], [null]])("con `above` en %s (un `cond && <X/>` que no se cumple) no queda un contenedor vacío", (above) => {
+    const { container } = render(<PageHeader above={above} title="Mis comentarios" />);
+    expect(container.querySelector("[data-page-header] .self-start")).toBeNull();
+  });
 });
 
 describe("los motivos de las portadas (T-616)", () => {

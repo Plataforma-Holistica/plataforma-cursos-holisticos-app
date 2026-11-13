@@ -114,7 +114,8 @@ describe("la pantalla de la cuenta (PA-25)", () => {
     const header = container.querySelector("[data-page-header]");
     expect(header).not.toBeNull();
     expect(header).toContainElement(screen.getByRole("heading", { level: 1, name: "Cuenta" }));
-    expect(within(header as HTMLElement).getByText("Tu nombre, tu contraseña, dónde tienes la sesión abierta y lo que comentaste.")).toBeVisible();
+    // Cambió por el requisito (revisión del carril A): la entradilla nombra también el correo, que tiene su bloque.
+    expect(within(header as HTMLElement).getByText("Tu nombre, tu correo y tu contraseña, dónde tienes la sesión abierta y lo que comentaste.")).toBeVisible();
     expect(header?.querySelector(".eyebrow")).toBeNull();
     expect(header?.querySelector("img")).toBeNull();
     expect(screen.getByRole("main")).toHaveClass("max-w-page");
@@ -122,6 +123,13 @@ describe("la pantalla de la cuenta (PA-25)", () => {
     expect(header).not.toContainElement(block);
     expect(block.closest(".max-w-form")).not.toBeNull();
     expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  // T-616, 3b-3 (revisión del carril A): un correo sin espacios no ensancha la página a 320 px; se parte donde haga falta.
+  it("un correo largo se parte en vez de ensanchar la pantalla", () => {
+    const long = "una.direccion.de.correo.muy.larga.para.probar@prueba.test";
+    render(<AccountScreen name="Ana" email={long} sessions={ALONE} />);
+    expect(within(screen.getByRole("region", { name: "Correo" })).getByText(long)).toHaveClass("wrap-anywhere");
   });
 
   it("en reposo: el nombre guardado en su campo, el correo a la vista y sin nada que anunciar", async () => {

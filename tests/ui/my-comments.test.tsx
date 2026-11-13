@@ -1,5 +1,6 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { startTransition, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { a11yViolations } from "../setup/a11y";
@@ -137,6 +138,36 @@ describe("la lista (PA-24)", () => {
     expect(header).not.toContainElement(screen.getByRole("article"));
     expect(screen.getByRole("article").closest(".max-w-form")).not.toBeNull();
     expect(await a11yViolations(view.container)).toEqual([]);
+  });
+
+  // T-616, 3b-3 (revisión del carril A): el foco después de borrar, también aquí y no solo en el e2e del equipo. Como en Next,
+  // la respuesta de la acción y la lista sin el comentario llegan en la misma transición: el diálogo y su botón se van con él,
+  // y el foco no debe caer al documento.
+  it("después de borrar, con el comentario ya fuera de la lista, el foco va al título", async () => {
+    let finish: (state: MineState) => void = () => undefined;
+    let drop: () => void = () => undefined;
+    const action = vi
+      .fn<() => Promise<MineState>>()
+      .mockResolvedValueOnce({ ...IDLE_MINE, attempt: 1, asking: id(1) })
+      .mockImplementationOnce(() => new Promise<MineState>((resolve) => (finish = resolve)));
+    function Refreshed() {
+      const [items, setItems] = useState([item(1)]);
+      drop = () => startTransition(() => setItems([]));
+      return <MyCommentsScreen items={items} next={null} cursor={null} action={action} />;
+    }
+    render(<Refreshed />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Borrar" }));
+    const dialog = await screen.findByRole("dialog", { name: "¿Borrar tu comentario?" });
+    await user.click(within(dialog).getByRole("button", { name: "Sí, borrarlo" }));
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      drop();
+      finish({ ...IDLE_MINE, attempt: 2, notice: { kind: "deleted", id: null } });
+    });
+    expect(screen.queryByRole("article")).toBeNull();
+    expect(screen.getByText("Borraste tu comentario.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "Mis comentarios" })).toHaveFocus());
   });
 
   it("borrar pregunta antes, con la revisión que se vio", async () => {
