@@ -209,3 +209,45 @@ describe("contraste de los tokens (diseño, secciones 3.3 y 3.4)", () => {
     expect(greys[3]).toBeLessThan(AA_TEXT);
   });
 });
+
+// T-616, 3b-2: el reproductor en oro (decisión del carril A del 2026-11-12). La barra de avance es un elemento de interfaz: lo
+// visto, en oro, se distingue de lo cargado y de la pista (3:1). Los dos son blanco translúcido, y se miden sobre el fondo del
+// reproductor (negro); sobre un cuadro claro del video bajan (límite conocido, como el de cualquier control sobre video). Los
+// menús de Mux van en `surface-2`: su texto y el oro del contorno y de la palomita ya están en la tabla de superficies.
+describe("el reproductor en oro (T-616, 3b-2)", () => {
+  const mux = css.slice(css.indexOf("@utility player-mux {"));
+  const alphaOf = (variable: string) => Number(mux.match(new RegExp(`${variable}: rgb\\(255 255 255 \\/ ([\\d.]+)\\);`))?.[1]);
+  const WHITE: Rgb = [255, 255, 255];
+  // El fondo del reproductor se escribe corto (`#000`), y la tabla de tokens lee solo los de seis cifras.
+  const PLAYER: Rgb = [0, 0, 0];
+  it("el fondo del reproductor es negro", () => {
+    expect(css).toMatch(/--player-bg: #000;/);
+  });
+
+  it.each([
+    ["--media-time-range-buffered-color", "lo cargado", 3.71],
+    ["--media-range-track-background", "la pista", 8.16],
+  ] as const)("el avance en oro contra %s (%s) sobre el negro del reproductor", (variable, _, expected) => {
+    const alpha = alphaOf(variable);
+    expect(alpha, `player-mux no define ${variable} como blanco con opacidad`).toBeGreaterThan(0);
+    const value = ratio(rgbOf("accent"), mix(WHITE, alpha, PLAYER));
+    expect(value).toBeGreaterThanOrEqual(AA_UI);
+    expect(value, "actualiza la tabla del diseño").toBe(expected);
+  });
+
+  it("lo elegido en el menú de velocidad: el blanco fijo de Mux sobre surface-3", () => {
+    const value = ratio(WHITE, rgbOf("surface-3"));
+    expect(value).toBeGreaterThanOrEqual(AA_TEXT);
+    expect(value, "actualiza la tabla del diseño").toBe(13.56);
+  });
+
+  it("el anillo de foco de un renglón del menú (el de Mux) sobre surface-2", () => {
+    const value = ratio(mix([27, 127, 204], 0.9, rgbOf("surface-2")), rgbOf("surface-2"));
+    expect(value).toBeGreaterThanOrEqual(AA_UI);
+    expect(value, "actualiza la tabla del diseño").toBe(3.27);
+  });
+
+  it("el icono en on-accent donde el oro es fondo", () => {
+    expect(ratio(rgbOf("on-accent"), rgbOf("accent"))).toBeGreaterThanOrEqual(AA_UI);
+  });
+});

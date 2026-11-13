@@ -19,53 +19,64 @@ vi.mock("@/app/cursos/[slug]/lecciones/[leccion]/watch-queue", async (original) 
   return { ...real, courier: new Proxy({}, { get: (_, key) => (postman.current as Record<PropertyKey, unknown>)[key] }) };
 });
 
-const player = vi.hoisted(() => ({ last: null as null | Record<string, unknown> }));
+// T-616, 3b-2: el reproductor simulado cuenta cuántas veces se monta y se desmonta. Si React lo volviera a montar a media
+// reproducción, la de verdad se cerraría y cortaría un tramo.
+const player = vi.hoisted(() => ({ last: null as null | Record<string, unknown>, mounts: 0, unmounts: 0 }));
 vi.mock("@/app/_catalog/resources/actions", () => ({ downloadResourceAction: vi.fn() }));
-vi.mock("@/app/_video/player", () => ({
-  Player: (props: {
-    watermark?: string;
-    startTime: number;
-    onExpired: (at: number) => void;
-    onFailed: () => void;
-    onPlaying: () => void;
-    onEnded?: () => void;
-    onCaptionsChange?: (on: boolean) => void;
-    onAdvancing?: (advancing: boolean) => void;
-    onProgress?: (at: number) => void;
-    onWatch?: (signal: unknown) => void;
-    notice?: string | null;
-  }) => {
-    player.last = props;
-    return (
-      <div data-testid="reproductor" data-start={String(props.startTime)}>
-        <button type="button" onClick={() => props.onExpired(42)}>
-          caduca
-        </button>
-        <button type="button" onClick={() => props.onFailed()}>
-          falla
-        </button>
-        <button type="button" onClick={() => props.onPlaying()}>
-          reproduce
-        </button>
-        <button type="button" onClick={() => props.onEnded?.()}>
-          termina
-        </button>
-        <button type="button" onClick={() => props.onCaptionsChange?.(true)}>
-          enciende subtítulos
-        </button>
-        <button type="button" onClick={() => props.onAdvancing?.(true)}>
-          avanza
-        </button>
-        <button type="button" onClick={() => props.onAdvancing?.(false)}>
-          se detiene
-        </button>
-        <button type="button" onClick={() => props.onProgress?.(61)}>
-          va en 61
-        </button>
-      </div>
-    );
-  },
-}));
+vi.mock("@/app/_video/player", async () => {
+  const { useEffect } = await import("react");
+  return {
+    Player: (props: {
+      watermark?: string;
+      startTime: number;
+      onExpired: (at: number) => void;
+      onFailed: () => void;
+      onPlaying: () => void;
+      onEnded?: () => void;
+      onCaptionsChange?: (on: boolean) => void;
+      onAdvancing?: (advancing: boolean) => void;
+      onProgress?: (at: number) => void;
+      onWatch?: (signal: unknown) => void;
+      notice?: string | null;
+    }) => {
+      player.last = props;
+      useEffect(() => {
+        player.mounts += 1;
+        return () => {
+          player.unmounts += 1;
+        };
+      }, []);
+      return (
+        <div data-testid="reproductor" data-start={String(props.startTime)}>
+          <button type="button" onClick={() => props.onExpired(42)}>
+            caduca
+          </button>
+          <button type="button" onClick={() => props.onFailed()}>
+            falla
+          </button>
+          <button type="button" onClick={() => props.onPlaying()}>
+            reproduce
+          </button>
+          <button type="button" onClick={() => props.onEnded?.()}>
+            termina
+          </button>
+          <button type="button" onClick={() => props.onCaptionsChange?.(true)}>
+            enciende subtítulos
+          </button>
+          <button type="button" onClick={() => props.onAdvancing?.(true)}>
+            avanza
+          </button>
+          <button type="button" onClick={() => props.onAdvancing?.(false)}>
+            se detiene
+          </button>
+          <button type="button" onClick={() => props.onProgress?.(61)}>
+            va en 61
+          </button>
+        </div>
+      );
+    },
+  };
+});
 
 import { LessonScreen, type LessonScreenProps } from "@/app/cursos/[slug]/lecciones/[leccion]/screen";
 import { createCourier } from "@/app/cursos/[slug]/lecciones/[leccion]/watch-queue";
@@ -97,7 +108,8 @@ const PROPS: LessonScreenProps = {
   teacher: { name: "Ana Robles", href: "/maestros/ana-robles" },
   cover: { practiceName: "Meditación", tone: 3 },
   summary: "Un curso corto.",
-  about: "Dura 7 min. Es del módulo «Uno».",
+  moduleTitle: "Uno",
+  about: "Dura 7 min.",
   modules: [
     {
       id: "m1",
@@ -141,6 +153,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   player.last = null;
+  player.mounts = 0;
+  player.unmounts = 0;
   window.localStorage.clear();
   postman.current = createCourier({
     storage: () => window.localStorage,
@@ -161,7 +175,7 @@ describe("lo de alrededor del reproductor", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Lección 2 · Respirar acostado" })).toBeVisible();
     expect(screen.getByRole("link", { name: "Respirar para dormir" })).toHaveAttribute("href", "/cursos/respirar");
     expect(screen.getByRole("link", { name: "Ana Robles" })).toHaveAttribute("href", "/maestros/ana-robles");
-    expect(screen.getAllByText("Dura 7 min. Es del módulo «Uno».").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Dura 7 min.").length).toBeGreaterThan(0);
     // Regresar lleva a la ficha del curso, que ya existe (PA-22).
     expect(screen.getByRole("link", { name: "Volver al curso" })).toHaveAttribute("href", "/cursos/respirar");
   });
@@ -1265,5 +1279,171 @@ describe("los recursos de la lección", () => {
     const selected = screen.getByRole("tab", { selected: true });
     expect(selected).toHaveAttribute("tabindex", "0");
     expect(screen.getByRole("tabpanel", { name: selected.textContent })).toBeVisible();
+  });
+});
+
+// T-616, 3b-2 (zona delicada por la medición): la lección en el lenguaje del rediseño sin tocar lo que mide.
+describe("el rediseño de la lección (T-616, 3b-2)", () => {
+  describe("el reproductor no se vuelve a montar", () => {
+    beforeEach(() => {
+      actions.playbackPresenceAction.mockImplementation((_slug: string, _lesson: string, _id: string, events: { seq: number }[]) =>
+        Promise.resolve({ kind: "ok", batch: { kind: "settled", seqs: events.map((event) => event.seq) } }),
+      );
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+    const press = async (name: string) => {
+      fireEvent.click(screen.getByRole("button", { name }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    };
+    const wait = (ms: number) =>
+      act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+
+    it("con todo lo que cambia alrededor mientras se reproduce, un solo montaje y ningún desmontaje", async () => {
+      vi.useFakeTimers();
+      const { view } = show({ comments: { kind: "unavailable" } });
+      fireEvent.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+      await wait(0);
+      expect(player.mounts).toBe(1);
+      // Avanzar, detenerse y los subtítulos.
+      await press("avanza");
+      await press("se detiene");
+      await press("enciende subtítulos");
+      await press("avanza");
+      // «Sin conexión» se prende y se apaga.
+      actions.playbackPresenceAction.mockRejectedValue(new Error("sin red"));
+      await wait(30_000);
+      await wait(30_000);
+      expect(screen.getByText("Sin conexión. Reintentando…")).toBeInTheDocument();
+      // El latido que la termina: cambia el temario, la barra y el aviso.
+      actions.playbackPresenceAction.mockResolvedValue({
+        kind: "ok",
+        batch: { kind: "settled", seqs: [], progress: { lessonId: LESSON, coveredSeconds: 380, completed: true, justCompleted: true } },
+      });
+      await wait(30_000);
+      expect(screen.queryAllByText("Sin conexión. Reintentando…")).toEqual([]);
+      expect(screen.getByText("Esta lección ya cuenta como terminada.")).toBeInTheDocument();
+      // Otra pestaña.
+      fireEvent.click(screen.getByRole("tab", { name: "Comentarios" }));
+      await wait(0);
+      // La página vuelve a pintar con props nuevas, como tras un `refresh()`.
+      view.rerender(<LessonScreen {...PROPS} comments={{ kind: "unavailable" }} progress={{ completed: 1, total: 2 }} />);
+      await wait(0);
+      // La pantalla cruza el ancho del escritorio.
+      wide(true);
+      await act(async () => {
+        window.dispatchEvent(new Event("resize"));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      // La dirección caduca y llega otra: cambia la concesión, no el reproductor.
+      await press("caduca");
+      await wait(0);
+      expect(actions.watchLessonAction).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId("reproductor")).toHaveAttribute("data-start", "42");
+      expect(player.mounts).toBe(1);
+      expect(player.unmounts).toBe(0);
+    });
+  });
+
+  describe("PA-33 es el estado de la flor", () => {
+    const DENIED = { initial: { kind: "denied", denial: { reason: "never_subscribed" } } } as Partial<LessonScreenProps>;
+
+    it("al cargar: la semilla, el título como h2 de siempre y «Ver planes»", () => {
+      const { area } = show(DENIED);
+      const heading = within(area()).getByRole("heading", { level: 2, name: "Esta lección pide una suscripción" });
+      expect(heading).toBeVisible();
+      expect(within(area()).getByRole("link", { name: "Ver planes" })).toBeVisible();
+      // La semilla de la flor, decorativa, arriba del título.
+      const seed = area().querySelector("svg[aria-hidden='true']");
+      expect(seed).not.toBeNull();
+      expect((seed?.compareDocumentPosition(heading) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("también cuando el acceso termina con la página abierta", async () => {
+      actions.watchLessonAction.mockResolvedValue({ kind: "denied", denial: { reason: "never_subscribed" } });
+      const { user, area } = show();
+      await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+      await within(area()).findByRole("heading", { level: 2, name: "Esta lección pide una suscripción" });
+      expect(area().querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    });
+
+    it("con PA-33 la sección no se pega arriba y en el teléfono crece con lo suyo; con video sigue pegada y en 16:9", async () => {
+      const section = () => screen.getByRole("region", { name: "Reproductor" });
+      const box = () => section().querySelector<HTMLElement>("div[tabindex='-1']");
+      const denied = show(DENIED);
+      expect(section()).not.toHaveClass("sticky");
+      expect(box()).toHaveClass("aspect-auto", "sm:aspect-video");
+      denied.view.unmount();
+      // Antes de reproducir, cargando y reproduciendo: nada cambia.
+      let release: (value: unknown) => void = () => undefined;
+      actions.watchLessonAction.mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+      const { user } = show();
+      const unchanged = () => {
+        expect(section()).toHaveClass("sticky");
+        expect(box()).toHaveClass("aspect-video");
+        expect(box()).not.toHaveClass("aspect-auto");
+      };
+      unchanged();
+      await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+      unchanged();
+      await act(async () => release(GRANT));
+      await screen.findByTestId("reproductor");
+      unchanged();
+    });
+
+    it("pasa las reglas de accesibilidad", async () => {
+      const { view } = show(DENIED);
+      expect(await a11yViolations(view.container)).toEqual([]);
+    });
+  });
+
+  describe("la cabecera y el temario", () => {
+    const title = () => screen.getByRole("heading", { level: 1, name: "Lección 2 · Respirar acostado" });
+
+    it("el antetítulo es el módulo de la lección, un párrafo antes del h1", () => {
+      show();
+      const eyebrow = title().previousElementSibling;
+      expect(eyebrow?.tagName).toBe("P");
+      expect(eyebrow).toHaveTextContent(/^Uno$/u);
+      expect(eyebrow).toHaveClass("eyebrow", "text-accent-muted");
+      expect(eyebrow).not.toHaveAttribute("id");
+    });
+
+    it("sin módulo, no hay antetítulo", () => {
+      show({ moduleTitle: null });
+      expect(title().previousElementSibling).toBeNull();
+    });
+
+    it("el título más grande, que parte una palabra larga sin ensanchar la columna", () => {
+      show();
+      expect(title()).toHaveClass("text-h1", "wrap-anywhere");
+      expect(title().closest(".lg\\:col-span-7")).toHaveClass("min-w-0");
+    });
+
+    it("el temario lleva la roseta en lo terminado y lo empezado, y la barra fina", () => {
+      const modules = PROPS.modules.map((group) => ({
+        ...group,
+        lessons: [
+          { ...group.lessons[0]!, state: "completed" as const },
+          { ...group.lessons[1]!, state: "in_progress" as const },
+        ],
+      }));
+      show({ modules, progress: { completed: 1, total: 2 } });
+      for (const link of screen.getAllByRole("link", { name: "Lección 1, Soltar los hombros, 5 min, terminada", hidden: true })) {
+        expect(link.querySelector("svg g.fill-accent-subtle")).not.toBeNull();
+      }
+      // La actual no lleva roseta: sigue con su icono de reproduciendo.
+      for (const link of screen.getAllByRole("link", { name: /^Lección 2, Respirar acostado, 7 min/u, hidden: true })) {
+        expect(link.querySelector("svg g")).toBeNull();
+      }
+      for (const bar of screen.getAllByRole("progressbar", { hidden: true })) {
+        expect(bar.closest("[data-size]")).toHaveAttribute("data-size", "thin");
+      }
+    });
   });
 });

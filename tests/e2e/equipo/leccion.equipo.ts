@@ -130,6 +130,27 @@ test("sin sesión: la lección de un curso normal manda a los planes (T-302); la
   await expect(page).toHaveURL(`/registro?volver=${encodeURIComponent(lessonUrl(OPEN_SLUG, openLesson))}`);
 });
 
+// T-616, 3b-2 (decisión del carril A del 2026-11-12): a 320 px el estado de PA-33 no cabe en el 16:9, así que su lugar crece
+// con lo suyo. El botón queda entero en la pantalla y dentro de su lugar, y la página no se desplaza de lado.
+test("sin acceso, a 320 px: el botón de PA-33 entero en la pantalla y dentro de su lugar, sin desplazamiento horizontal", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  const who = await person();
+  await signIn(page, who, lessonUrl(SLUG, lesson));
+  await expect(page).toHaveURL(lessonUrl(SLUG, lesson));
+  const action = page.getByRole("link", { name: "Ver planes" });
+  await expect(action).toBeInViewport({ ratio: 1 });
+  const place = page.getByRole("region", { name: "Reproductor" });
+  const [inner, outer] = await Promise.all([action.boundingBox(), place.boundingBox()]);
+  expect(inner).not.toBeNull();
+  expect(outer).not.toBeNull();
+  if (inner === null || outer === null) return;
+  expect(inner.y).toBeGreaterThanOrEqual(outer.y);
+  expect(inner.y + inner.height).toBeLessThanOrEqual(outer.y + outer.height);
+  expect(inner.x).toBeGreaterThanOrEqual(outer.x);
+  expect(inner.x + inner.width).toBeLessThanOrEqual(outer.x + outer.width);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+});
+
 test("sin acceso: PA-33 desde que carga, sin reproducir ni nada del video en lo servido; y una lección que no existe, PA-19", async ({ page }) => {
   const who = await person();
   await signIn(page, who, lessonUrl(SLUG, lesson));

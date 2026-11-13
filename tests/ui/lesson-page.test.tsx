@@ -87,6 +87,13 @@ describe("la página de una lección (PA-22)", () => {
     });
   });
 
+  // T-616, 3b-2 (decisión del carril A del 2026-11-12): el módulo va en el antetítulo de la cabecera, siempre a la vista, y
+  // «Sobre esta lección» deja de repetirlo.
+  it("le pasa el módulo para el antetítulo, y «Sobre esta lección» dice la duración sin repetir el módulo", async () => {
+    render(await LessonRoute(params()));
+    expect(mocks.shown).toMatchObject({ moduleTitle: "Uno", about: "Dura 5 min." });
+  });
+
   it("si la ficha del curso no se pudo leer, la lección se ve igual: sin enlace al maestro ni portada", async () => {
     mocks.coursePage.mockResolvedValue({ kind: "unavailable" });
     render(await LessonRoute(params()));
