@@ -13,9 +13,11 @@ import { resolveDestination, signInPath, signUpPath } from "@/services/account/n
 import { planOffer, planStanding } from "@/services/billing/checkout-service";
 import { cx } from "@/ui/cx";
 import { InlineAlert } from "@/ui/inline-alert";
+import { PageHeader } from "@/ui/page-header";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
 
+import { PlanIncludes } from "./includes";
 import { plansLegalHref as legalHref } from "./legal-href";
 import { closedPlansDetour, plansHref, readPlansQuery } from "./outcomes";
 import { PlansScreen } from "./screen";
@@ -79,17 +81,21 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
       {who.kind === "visitor" && <PublicHeader onPlans />}
       {/* A quien no se sabe quién es, ni la del alumno ni la pública: solo el logotipo. */}
       {who.kind === "unknown" && <BrandBar />}
-      <main id={MAIN_CONTENT_ID} tabIndex={-1} className={cx("mx-auto flex max-w-page flex-col gap-10 px-4 pt-6 outline-none sm:px-8", who.kind === "student" ? "pb-24 sm:pb-16" : "pb-16")}>
-        {view.kind === "not_for_sale" ? (
-          <div className="flex max-w-reading flex-col gap-4">
-            <h1 className="text-display-l">{text.title}</h1>
-            <InlineAlert tone="neutral" action={who.kind === "visitor" ? <TextLink href={signInPath(plansHref(null, null))}>{text.haveAccount}</TextLink> : undefined}>
-              {text.notForSale}
-            </InlineAlert>
-          </div>
-        ) : (
-          <PlansScreen view={view} />
-        )}
+      {/* La cabecera del rediseño (T-616, 3b-4), vendan o no: sin foto (con la filigrana, como la cuenta) y sin antetítulo, decisión mía
+          sin confirmar. Lo que incluye cualquier plan va en ella, bajo el título; el cuerpo, en la misma columna. */}
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className={cx("mx-auto flex max-w-page flex-col outline-none", who.kind === "student" ? "pb-24 sm:pb-16" : "pb-16")}>
+        <PageHeader title={text.title}>{view.kind === "ready" && <PlanIncludes />}</PageHeader>
+        <div className="px-4 sm:px-8">
+          {view.kind === "not_for_sale" ? (
+            <div className="max-w-reading">
+              <InlineAlert tone="neutral" action={who.kind === "visitor" ? <TextLink href={signInPath(plansHref(null, null))}>{text.haveAccount}</TextLink> : undefined}>
+                {text.notForSale}
+              </InlineAlert>
+            </div>
+          ) : (
+            <PlansScreen view={view} />
+          )}
+        </div>
       </main>
       {who.kind === "visitor" && <PublicFooter onPlans />}
     </>

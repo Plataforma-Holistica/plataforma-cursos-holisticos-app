@@ -11,7 +11,7 @@ import { InlineAlert } from "@/ui/inline-alert";
 import { TextLink } from "@/ui/text-link";
 
 import { startCheckoutAction } from "./actions";
-import { PlanIncludes } from "./includes";
+import { PlanCardBody } from "./card-body";
 import { ACCEPT_FIELD, AMOUNT_FIELD, DOCUMENT_FIELD, PLAN_FIELD, RETURN_FIELD, type PlansAnswer, type PlansProblem, type PlansState } from "./outcomes";
 import { PAY_BLOCK_ID, type PlanCard, type PlanSummary, type PlansView } from "./view";
 
@@ -34,13 +34,10 @@ const ANSWERS: Record<PlansAnswer, string> = {
 
 type Ready = Extract<PlansView, { kind: "ready" }>;
 
+// El título y lo que incluye van en la cabecera, que pinta la página (T-616, 3b-4).
 export function PlansScreen({ view }: { view: Ready }) {
   return (
     <div className="flex flex-col gap-10">
-      <div className="flex max-w-reading flex-col gap-3">
-        <h1 className="text-display-l text-balance">{text.title}</h1>
-        <PlanIncludes />
-      </div>
       {view.canceled && <InlineAlert tone="neutral">{text.canceled}</InlineAlert>}
       <section aria-labelledby="planes-elige" className="flex flex-col gap-4">
         <h2 id="planes-elige" className="sr-only">
@@ -57,20 +54,22 @@ export function PlansScreen({ view }: { view: Ready }) {
   );
 }
 
+/**
+ * Una tarjeta. Elegido (`?plan=`) lleva el contorno del acento y «Plan elegido»; destacado (el anual que ahorra, T-616, 3b-4), el
+ * antetítulo, la cifra y, sin plan elegido, el botón principal. Los dos se suman sin confundirse. El antetítulo va antes del `<h3>` y
+ * fuera de él: se lee, pero el nombre del encabezado y el del botón siguen siendo los del plan.
+ */
 function PlanOption({ card }: { card: PlanCard }) {
   return (
     <li className={cx("flex flex-col gap-3 rounded-md border p-6", card.chosen ? "border-accent bg-surface-2" : "border-border bg-surface-1")}>
-      <h3 className="text-h3">{card.name}</h3>
-      <p className="text-h2">{card.price}</p>
-      <p className="text-body-s text-text-2">{card.repeat}</p>
-      {card.equivalent !== null && <p className="text-body-s text-text-2">{card.equivalent}</p>}
+      <PlanCardBody card={card} />
       <div className="mt-auto pt-2">
         {card.chosen ? (
           <p aria-current="true" className="font-semibold">
             {text.chosen}
           </p>
         ) : (
-          <Button href={card.href} variant="secondary" size="md">
+          <Button href={card.href} variant={card.primary ? "primary" : "secondary"} size="md">
             {card.chooseLabel}
           </Button>
         )}

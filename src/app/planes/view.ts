@@ -3,7 +3,7 @@ import { plans as text } from "@/messages/es/plans";
 import { t } from "@/messages/format";
 import type { CheckoutPlan, Offer } from "@/services/billing/checkout";
 
-import { confirmingHref, monthlyEquivalent, plansHref, priceText, type PlansQuery } from "./outcomes";
+import { annualSaving, confirmingHref, monthlyEquivalent, plansHref, priceText, savingText, type PlansQuery } from "./outcomes";
 
 // PA-04 · lo que pinta la pantalla de los planes, armado en el servidor con la oferta de la base y quien mira (T-302). Puro.
 //
@@ -19,9 +19,14 @@ export interface PlanCard {
   price: string;
   repeat: string;
   equivalent: string | null;
+  /** El anual que ahorra (T-616, 3b-4): «Conviene más» y su ahorro. Va siempre con `saving`. */
+  featured: boolean;
+  saving: string | null;
   href: string;
   chooseLabel: string;
   chosen: boolean;
+  /** El botón principal: el del destacado, solo sin plan elegido. Elegido uno, la acción principal es pagar. */
+  primary: boolean;
 }
 
 export interface PlanSummary {
@@ -69,12 +74,32 @@ export function planCardText(plan: CheckoutPlan, amountCents: number): { name: s
   };
 }
 
+/**
+ * Lo que dicen las tarjetas de una oferta: cada una con su `planCardText`, y el anual destacado con lo que ahorra (T-616, 3b-4). Los planes
+ * se buscan por nombre, no por su lugar, y hace falta exactamente uno de cada uno; si no, o si no ahorra, ninguno se destaca. La marca y la
+ * cifra van juntas. Lo comparten `/planes` y la portada: para el mismo par, la misma cifra.
+ */
+export function offerCardsText(
+  plans: readonly { plan: CheckoutPlan; amountCents: number }[],
+): ({ plan: CheckoutPlan } & ReturnType<typeof planCardText> & { featured: boolean; saving: string | null })[] {
+  const monthly = plans.filter((each) => each.plan === "monthly");
+  const annual = plans.filter((each) => each.plan === "annual");
+  const pesos = monthly.length === 1 && annual.length === 1 ? annualSaving(monthly[0]!.amountCents, annual[0]!.amountCents) : null;
+  const saving = pesos === null ? null : t(text.saving, { saving: savingText(pesos) });
+  return plans.map(({ plan, amountCents }) => {
+    const featured = plan === "annual" && saving !== null;
+    return { plan, ...planCardText(plan, amountCents), featured, saving: featured ? saving : null };
+  });
+}
+
 export interface ShowcaseCard {
   plan: CheckoutPlan;
   name: string;
   price: string;
   repeat: string;
   equivalent: string | null;
+  featured: boolean;
+  saving: string | null;
   href: string;
   chooseLabel: string;
 }
@@ -97,9 +122,10 @@ export function showcaseView(facts: ShowcaseFacts, legalHref: (doc: "recurring" 
   if (facts.plans.length === 0 || recurringHref === null) return { kind: "hidden" };
   return {
     kind: "ready",
-    cards: facts.plans.map(({ plan, amountCents }) => ({
+    // Sin botón principal: en la portada es «Suscribirme» (decisión del carril A del 2026-11-13, sin confirmar por Sergio).
+    cards: offerCardsText(facts.plans).map(({ plan, ...card }) => ({
       plan,
-      ...planCardText(plan, amountCents),
+      ...card,
       href: `${plansHref(plan, null)}#${PAY_BLOCK_ID}`,
       chooseLabel: t(text.chooseThis, { plan: plan === "monthly" ? text.monthly : text.annual }),
     })),
@@ -112,14 +138,17 @@ export function plansView(offer: Offer, query: PlansQuery, viewer: PlansViewer, 
   const recurring = offer.recurring;
   const self = plansHref(query.plan, query.returnTo);
 
-  const cards = offer.plans.map((each): PlanCard => ({
-    plan: each.plan,
-    ...planCardText(each.plan, each.amountCents),
-    // Al elegir, la página baja a «Antes de pagar»: en el teléfono quedaría fuera de la vista.
-    href: `${plansHref(each.plan, query.returnTo)}#${PAY_BLOCK_ID}`,
-    chooseLabel: t(text.chooseThis, { plan: each.plan === "monthly" ? text.monthly : text.annual }),
-    chosen: each.plan === query.plan,
-  }));
+  const cards = offerCardsText(offer.plans).map(
+    (each): PlanCard => ({
+      ...each,
+      // Al elegir, la página baja a «Antes de pagar»: en el teléfono quedaría fuera de la vista.
+      href: `${plansHref(each.plan, query.returnTo)}#${PAY_BLOCK_ID}`,
+      chooseLabel: t(text.chooseThis, { plan: each.plan === "monthly" ? text.monthly : text.annual }),
+      chosen: each.plan === query.plan,
+      // Destacar no elige: sin `?plan=` no hay «Antes de pagar», y con un plan elegido el principal es pagar.
+      primary: each.featured && query.plan === null,
+    }),
+  );
 
   const chosen = offer.plans.find((each) => each.plan === query.plan) ?? null;
   const refundHref = offer.refundPolicy === null ? null : legalHref("refund", null);
