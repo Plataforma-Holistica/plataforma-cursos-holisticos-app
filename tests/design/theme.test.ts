@@ -59,17 +59,24 @@ describe("hoja de tokens", () => {
   });
 });
 
-/** El bloque entero de una utilidad, con sus reglas anidadas (las llaves se cuentan). */
-function utilityBlock(name: string): string {
-  const start = css.indexOf(`@utility ${name} {`);
-  if (start < 0) throw new Error(`La hoja no define @utility ${name}.`);
+/** El bloque entero que abre `header` dentro de `text`, con lo anidado (las llaves se cuentan). Vacío si no está. */
+function blockAt(text: string, header: string): string {
+  const start = text.indexOf(`${header} {`);
+  if (start < 0) return "";
   let depth = 0;
-  for (let index = css.indexOf("{", start); index < css.length; index += 1) {
-    if (css[index] === "{") depth += 1;
-    if (css[index] === "}") depth -= 1;
-    if (depth === 0) return css.slice(start, index + 1);
+  for (let index = text.indexOf("{", start); index < text.length; index += 1) {
+    if (text[index] === "{") depth += 1;
+    if (text[index] === "}") depth -= 1;
+    if (depth === 0) return text.slice(start, index + 1);
   }
-  throw new Error(`@utility ${name} no cierra.`);
+  throw new Error(`${header} no cierra.`);
+}
+
+/** El bloque entero de una utilidad, con sus reglas anidadas. */
+function utilityBlock(name: string): string {
+  const block = blockAt(css, `@utility ${name}`);
+  if (block === "") throw new Error(`La hoja no define @utility ${name}.`);
+  return block;
 }
 
 /** El cuerpo de la regla anidada que empieza con ese selector, dentro de un bloque. */
@@ -100,6 +107,17 @@ describe("el reproductor en oro (T-616, 3b-2)", () => {
     // El «1x» de la velocidad y el tiempo pintan texto: su color, no el del tooltip.
     expect(ruleBody(mux, "&::part(playback-rate button):hover")).toContain("color: var(--on-accent);");
     expect(ruleBody(mux, "&::part(time display):hover")).toContain("color: var(--on-accent);");
+  });
+
+  // Revisión de la 154 (carril A): en una pantalla táctil, `:hover` se queda puesto después del toque y el botón seguiría en oro.
+  it("lo de pasar el cursor, solo donde hay cursor (`hover: hover`)", () => {
+    const pointer = blockAt(mux, "@media (hover: hover)");
+    expect(pointer, "falta el bloque @media (hover: hover)").not.toBe("");
+    for (const selector of ["&::part(bottom button):hover", "&::part(pre-play):hover", "&::part(playback-rate button):hover", "&::part(time display):hover"]) {
+      expect(pointer, selector).toContain(`${selector} {`);
+    }
+    // Fuera del bloque, ninguna regla con `:hover` (los comentarios no cuentan).
+    expect(mux.replace(pointer, "").replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/:hover/);
   });
 
   it("ni el central del teléfono (transparente al pasar) ni los tooltips se oscurecen", () => {

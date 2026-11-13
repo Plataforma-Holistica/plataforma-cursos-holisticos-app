@@ -131,31 +131,45 @@ test("sin sesión: la lección de un curso normal manda a los planes (T-302); la
 });
 
 // T-616, 3b-2 (decisión del carril A del 2026-11-12): a 320 px el estado de PA-33 no cabe en el 16:9, así que su lugar crece
-// con lo suyo. El botón queda entero en la pantalla y dentro de su lugar, y la página no se desplaza de lado.
-test("sin acceso, a 320 px: el botón de PA-33 entero en la pantalla y dentro de su lugar, sin desplazamiento horizontal", async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 640 });
-  const who = await person();
-  await signIn(page, who, lessonUrl(SLUG, lesson));
-  await expect(page).toHaveURL(lessonUrl(SLUG, lesson));
-  const action = page.getByRole("link", { name: "Ver planes" });
-  await expect(action).toBeInViewport({ ratio: 1 });
-  const place = page.getByRole("region", { name: "Reproductor" });
-  const [inner, outer] = await Promise.all([action.boundingBox(), place.boundingBox()]);
-  expect(inner).not.toBeNull();
-  expect(outer).not.toBeNull();
-  if (inner === null || outer === null) return;
-  expect(inner.y).toBeGreaterThanOrEqual(outer.y);
-  expect(inner.y + inner.height).toBeLessThanOrEqual(outer.y + outer.height);
-  expect(inner.x).toBeGreaterThanOrEqual(outer.x);
-  expect(inner.x + inner.width).toBeLessThanOrEqual(outer.x + outer.width);
-  // Y nada lo tapa (la barra de abajo del alumno es fija): en su centro está el enlace.
-  const onTop = await page.evaluate(
-    ([x, y]) => document.elementFromPoint(x ?? 0, y ?? 0)?.closest("a")?.textContent ?? null,
-    [inner.x + inner.width / 2, inner.y + inner.height / 2],
-  );
-  expect(onTop).toBe("Ver planes");
-  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
-});
+// con lo suyo. El botón queda entero en la pantalla, dentro de su lugar y sin nada encima, y la página no se desplaza de lado.
+// Con el motivo más corto y con el más largo (la revisión de la 154): la gracia que terminó, con su fecha y «Volver a
+// suscribirme». Esa se arma escribiendo la suscripción como el dueño, como `subscribe`: un periodo que terminó hace 20 días
+// con su renovación fallida ese día; con los 7 días de gracia de la semilla, la gracia terminó hace 13.
+for (const reason of ["never_subscribed", "grace_ended"] as const) {
+  test(`sin acceso (${reason}), a 320 px: el botón de PA-33 entero en la pantalla y dentro de su lugar, sin desplazamiento horizontal`, async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    const who = await person();
+    if (reason === "grace_ended") {
+      await ownerQuery(
+        `insert into public.subscriptions (profile_id, provider, provider_subscription_id, plan, status, currency, current_period_start, current_period_end, last_renewal_failed_at)
+         values ($1, 'manual', gen_random_uuid()::text, 'monthly', 'expired', 'MXN', now() - interval '50 days', now() - interval '20 days', now() - interval '20 days')`,
+        [who.id],
+      );
+    }
+    await signIn(page, who, lessonUrl(SLUG, lesson));
+    await expect(page).toHaveURL(lessonUrl(SLUG, lesson));
+    const label = reason === "grace_ended" ? "Volver a suscribirme" : "Ver planes";
+    if (reason === "grace_ended") await expect(page.getByRole("heading", { level: 2, name: /^Tu acceso terminó el / })).toBeVisible();
+    const action = page.getByRole("link", { name: label });
+    await expect(action).toBeInViewport({ ratio: 1 });
+    const place = page.getByRole("region", { name: "Reproductor" });
+    const [inner, outer] = await Promise.all([action.boundingBox(), place.boundingBox()]);
+    expect(inner).not.toBeNull();
+    expect(outer).not.toBeNull();
+    if (inner === null || outer === null) return;
+    expect(inner.y).toBeGreaterThanOrEqual(outer.y);
+    expect(inner.y + inner.height).toBeLessThanOrEqual(outer.y + outer.height);
+    expect(inner.x).toBeGreaterThanOrEqual(outer.x);
+    expect(inner.x + inner.width).toBeLessThanOrEqual(outer.x + outer.width);
+    // Y nada lo tapa (la barra de abajo del alumno es fija): en su centro está el enlace.
+    const onTop = await page.evaluate(
+      ([x, y]) => document.elementFromPoint(x ?? 0, y ?? 0)?.closest("a")?.textContent ?? null,
+      [inner.x + inner.width / 2, inner.y + inner.height / 2],
+    );
+    expect(onTop).toBe(label);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  });
+}
 
 test("sin acceso: PA-33 desde que carga, sin reproducir ni nada del video en lo servido; y una lección que no existe, PA-19", async ({ page }) => {
   const who = await person();
