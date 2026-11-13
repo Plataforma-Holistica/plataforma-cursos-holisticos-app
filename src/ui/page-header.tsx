@@ -1,5 +1,5 @@
 import Image, { type StaticImageData } from "next/image";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 import { cx } from "./cx";
 import { Filigree } from "./flower";
@@ -15,10 +15,15 @@ import { Filigree } from "./flower";
 // El antetítulo de una cabecera va siempre en oro pleno: en oro apagado no llegaba a 4.5 ni sobre la foto (4.2)
 // ni sobre la filigrana con su resplandor (4.38). El oro apagado se queda para los antetítulos sobre el fondo liso.
 // Cada foto se mide con su texto (contraste AA). La foto carga primero: es lo más grande que se ve al llegar.
-// El título es el `<h1>` de la pantalla.
+// El título es el `<h1>` de la pantalla. Con `titleRef` (3b-3), la pantalla le lleva el foco por programa: cuando lo
+// pulsado se va con la respuesta («Mis comentarios», después de borrar).
 
 export interface PageHeaderProps {
   title: ReactNode;
+  /** El `<h1>` recibe el foco por programa (`tabIndex={-1}`, sin contorno): cuando lo pulsado se va con la respuesta. */
+  titleRef?: Ref<HTMLHeadingElement>;
+  /** Lo que va arriba del antetítulo, dentro de la cabecera: «Volver a…». */
+  above?: ReactNode;
   eyebrow?: string;
   /** Lo que acompaña al título, en el segundo tono. */
   lead?: ReactNode;
@@ -29,7 +34,7 @@ export interface PageHeaderProps {
   className?: string;
 }
 
-export function PageHeader({ title, eyebrow, lead, photo, size = "regular", children, className }: PageHeaderProps) {
+export function PageHeader({ title, titleRef, above, eyebrow, lead, photo, size = "regular", children, className }: PageHeaderProps) {
   const hero = size === "hero";
   return (
     // La alta mide 368 px en computadora (T-616, solicitud 3: la cabecera del inicio a 360–380 px, para que el protagonista
@@ -64,8 +69,15 @@ export function PageHeader({ title, eyebrow, lead, photo, size = "regular", chil
       {/* La entrada anima solo lo que acompaña al título: el `<h1>` se pinta de inmediato, porque suele ser lo más
           grande que se ve al llegar y arrancarlo invisible retrasaba su pintado (LCP) los 480 ms de la entrada. */}
       <div className={cx("relative mx-auto flex w-full max-w-page flex-col gap-3 px-4 sm:px-8", hero ? "pt-16 pb-8 sm:pt-24 sm:pb-16" : "pt-12 pb-10 sm:pt-24 sm:pb-14")}>
+        {above}
         {eyebrow !== undefined && <p className="animate-enter eyebrow text-accent">{eyebrow}</p>}
-        <h1 className={cx("max-w-reading text-text", hero ? "text-display-xl" : "text-display-l")}>{title}</h1>
+        <h1
+          ref={titleRef}
+          tabIndex={titleRef === undefined ? undefined : -1}
+          className={cx("max-w-reading text-text", hero ? "text-display-xl" : "text-display-l", titleRef !== undefined && "outline-none")}
+        >
+          {title}
+        </h1>
         {lead !== undefined && <div className="max-w-reading animate-enter text-body-l text-text-2">{lead}</div>}
         {children !== undefined && <div className="animate-enter">{children}</div>}
       </div>
