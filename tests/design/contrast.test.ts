@@ -224,15 +224,24 @@ describe("el reproductor en oro (T-616, 3b-2)", () => {
     expect(css).toMatch(/--player-bg: #000;/);
   });
 
-  it.each([
-    ["--media-time-range-buffered-color", "lo cargado", 3.71],
-    ["--media-range-track-background", "la pista", 8.16],
-  ] as const)("el avance en oro contra %s (%s) sobre el negro del reproductor", (variable, _, expected) => {
-    const alpha = alphaOf(variable);
-    expect(alpha, `player-mux no define ${variable} como blanco con opacidad`).toBeGreaterThan(0);
-    const value = ratio(rgbOf("accent"), mix(WHITE, alpha, PLAYER));
+  // Lo cargado va dentro de la pista (media-chrome lo inserta en `#track`), así que se ve con las dos capas encima del negro.
+  // La revisión del diff de la 3b-2 encontró que medirlo solo daba 3.71 cuando lo que se ve daba 2.40.
+  const TRACK = "--media-range-track-background";
+  const BUFFERED = "--media-time-range-buffered-color";
+  it("el avance en oro contra la pista sobre el negro del reproductor", () => {
+    const track = alphaOf(TRACK);
+    expect(track, `player-mux no define ${TRACK} como blanco con opacidad`).toBeGreaterThan(0);
+    const value = ratio(rgbOf("accent"), mix(WHITE, track, PLAYER));
     expect(value).toBeGreaterThanOrEqual(AA_UI);
-    expect(value, "actualiza la tabla del diseño").toBe(expected);
+    expect(value, "actualiza la tabla del diseño").toBe(8.16);
+  });
+
+  it("el avance en oro contra lo cargado, que va sobre la pista, sobre el negro del reproductor", () => {
+    const [track, buffered] = [alphaOf(TRACK), alphaOf(BUFFERED)];
+    expect(buffered, `player-mux no define ${BUFFERED} como blanco con opacidad`).toBeGreaterThan(0);
+    const value = ratio(rgbOf("accent"), mix(WHITE, buffered, mix(WHITE, track, PLAYER)));
+    expect(value).toBeGreaterThanOrEqual(AA_UI);
+    expect(value, "actualiza la tabla del diseño").toBe(3.71);
   });
 
   it("lo elegido en el menú de velocidad: el blanco fijo de Mux sobre surface-3", () => {

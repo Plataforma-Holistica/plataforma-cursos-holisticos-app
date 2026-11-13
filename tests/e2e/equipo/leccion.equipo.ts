@@ -148,6 +148,12 @@ test("sin acceso, a 320 px: el botón de PA-33 entero en la pantalla y dentro de
   expect(inner.y + inner.height).toBeLessThanOrEqual(outer.y + outer.height);
   expect(inner.x).toBeGreaterThanOrEqual(outer.x);
   expect(inner.x + inner.width).toBeLessThanOrEqual(outer.x + outer.width);
+  // Y nada lo tapa (la barra de abajo del alumno es fija): en su centro está el enlace.
+  const onTop = await page.evaluate(
+    ([x, y]) => document.elementFromPoint(x ?? 0, y ?? 0)?.closest("a")?.textContent ?? null,
+    [inner.x + inner.width / 2, inner.y + inner.height / 2],
+  );
+  expect(onTop).toBe("Ver planes");
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
 });
 

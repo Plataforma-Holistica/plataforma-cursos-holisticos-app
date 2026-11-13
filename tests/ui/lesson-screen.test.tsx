@@ -1306,6 +1306,17 @@ describe("el rediseño de la lección (T-616, 3b-2)", () => {
 
     it("con todo lo que cambia alrededor mientras se reproduce, un solo montaje y ningún desmontaje", async () => {
       vi.useFakeTimers();
+      // El ancho de la pantalla, con sus avisos de cambio: `Tabs` escucha el `change` de la consulta.
+      const listeners = new Set<() => void>();
+      let wideNow = false;
+      vi.stubGlobal("matchMedia", (query: string) => ({
+        get matches() {
+          return wideNow && query.includes("min-width");
+        },
+        media: query,
+        addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+      }));
       const { view } = show({ comments: { kind: "unavailable" } });
       fireEvent.click(screen.getByRole("button", { name: "Reproducir la lección" }));
       await wait(0);
@@ -1334,12 +1345,14 @@ describe("el rediseño de la lección (T-616, 3b-2)", () => {
       // La página vuelve a pintar con props nuevas, como tras un `refresh()`.
       view.rerender(<LessonScreen {...PROPS} comments={{ kind: "unavailable" }} progress={{ completed: 1, total: 2 }} />);
       await wait(0);
-      // La pantalla cruza el ancho del escritorio.
-      wide(true);
+      // La pantalla cruza el ancho del escritorio: la pestaña del temario se va (queda en su columna).
+      expect(screen.getByRole("tab", { name: "Temario" })).toBeInTheDocument();
+      wideNow = true;
       await act(async () => {
-        window.dispatchEvent(new Event("resize"));
+        for (const listener of listeners) listener();
         await vi.advanceTimersByTimeAsync(0);
       });
+      expect(screen.queryByRole("tab", { name: "Temario" })).toBeNull();
       // La dirección caduca y llega otra: cambia la concesión, no el reproductor.
       await press("caduca");
       await wait(0);
@@ -1364,12 +1377,28 @@ describe("el rediseño de la lección (T-616, 3b-2)", () => {
       expect((seed?.compareDocumentPosition(heading) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it("también cuando el acceso termina con la página abierta", async () => {
+    it("también cuando el acceso se pierde al pulsar «Reproducir»", async () => {
       actions.watchLessonAction.mockResolvedValue({ kind: "denied", denial: { reason: "never_subscribed" } });
       const { user, area } = show();
       await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
       await within(area()).findByRole("heading", { level: 2, name: "Esta lección pide una suscripción" });
       expect(area().querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    });
+
+    // Revisión del diff de la 3b-2: de reproduciendo a PA-33 (la dirección caduca y la nueva ya no se da). El reproductor se
+    // desmonta una vez y no vuelve, y la sección deja de pegarse.
+    it("y cuando termina reproduciendo: el reproductor se va una vez, la semilla, y la sección sin pegarse", async () => {
+      const { user, area } = show();
+      await user.click(screen.getByRole("button", { name: "Reproducir la lección" }));
+      await screen.findByTestId("reproductor");
+      expect(area()).toHaveClass("sticky");
+      actions.watchLessonAction.mockResolvedValue({ kind: "denied", denial: { reason: "never_subscribed" } });
+      await user.click(screen.getByRole("button", { name: "caduca" }));
+      await within(area()).findByRole("heading", { level: 2, name: "Esta lección pide una suscripción" });
+      expect(area().querySelector("svg[aria-hidden='true']")).not.toBeNull();
+      expect(area()).not.toHaveClass("sticky");
+      expect(screen.queryByTestId("reproductor")).toBeNull();
+      expect([player.mounts, player.unmounts]).toEqual([1, 1]);
     });
 
     it("con PA-33 la sección no se pega arriba y en el teléfono crece con lo suyo; con video sigue pegada y en 16:9", async () => {
@@ -1410,7 +1439,8 @@ describe("el rediseño de la lección (T-616, 3b-2)", () => {
       const eyebrow = title().previousElementSibling;
       expect(eyebrow?.tagName).toBe("P");
       expect(eyebrow).toHaveTextContent(/^Uno$/u);
-      expect(eyebrow).toHaveClass("eyebrow", "text-accent-muted");
+      // Una palabra larga se parte: con `min-w-0` en la columna, si no, se saldría de ella.
+      expect(eyebrow).toHaveClass("eyebrow", "text-accent-muted", "wrap-anywhere");
       expect(eyebrow).not.toHaveAttribute("id");
     });
 
@@ -1425,17 +1455,17 @@ describe("el rediseño de la lección (T-616, 3b-2)", () => {
       expect(title().closest(".lg\\:col-span-7")).toHaveClass("min-w-0");
     });
 
-    it("el temario lleva la roseta en lo terminado y lo empezado, y la barra fina", () => {
+    it.each([
+      ["completed", "terminada", "fill-accent-subtle"],
+      ["in_progress", "a medias", "stroke-text-2"],
+    ] as const)("el temario lleva la roseta en lo %s (que no es la actual), y la barra fina", (state, wording, tone) => {
       const modules = PROPS.modules.map((group) => ({
         ...group,
-        lessons: [
-          { ...group.lessons[0]!, state: "completed" as const },
-          { ...group.lessons[1]!, state: "in_progress" as const },
-        ],
+        lessons: [{ ...group.lessons[0]!, state }, { ...group.lessons[1]!, state: "in_progress" as const }],
       }));
       show({ modules, progress: { completed: 1, total: 2 } });
-      for (const link of screen.getAllByRole("link", { name: "Lección 1, Soltar los hombros, 5 min, terminada", hidden: true })) {
-        expect(link.querySelector("svg g.fill-accent-subtle")).not.toBeNull();
+      for (const link of screen.getAllByRole("link", { name: `Lección 1, Soltar los hombros, 5 min, ${wording}`, hidden: true })) {
+        expect(link.querySelector(`svg g.${tone}`)).not.toBeNull();
       }
       // La actual no lleva roseta: sigue con su icono de reproduciendo.
       for (const link of screen.getAllByRole("link", { name: /^Lección 2, Respirar acostado, 7 min/u, hidden: true })) {

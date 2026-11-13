@@ -85,7 +85,12 @@ describe("el reproductor en oro (T-616, 3b-2)", () => {
   const mux = utilityBlock("player-mux");
 
   it("el acento de Mux es el de la marca, y lo de antes sigue primero (lo lee media.test.ts)", () => {
-    expect(mux).toContain("--media-accent-color: var(--accent);");
+    // En el cuerpo de la utilidad, no dentro de una regla anidada (como la de la pantalla completa propia), y sin comentarios.
+    const topLevel = mux
+      .slice(mux.indexOf("{") + 1, -1)
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/[^;{}]+\{[^{}]*\}/g, "");
+    expect(topLevel).toContain("--media-accent-color: var(--accent);");
     expect(mux).toMatch(/@utility player-mux \{[^}]*--rendition-menu-button: none;/);
   });
 
