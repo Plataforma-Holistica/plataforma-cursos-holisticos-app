@@ -231,6 +231,22 @@ describe("el anual destacado y su ahorro (T-616, 3b-4)", () => {
     expect(ready(offerOf(SEED), "annual").cards.map((card) => card.primary)).toEqual([false, false]);
   });
 
+  // Revisión del carril A sobre de38193: con un pago en confirmación o con acceso, el aviso dice que no vuelva a pagar; un botón en oro
+  // para elegir el anual lo contradiría. Se quedan el antetítulo y la cifra.
+  it("con un pago en confirmación o con acceso, ningún botón principal aunque el anual siga destacado", () => {
+    for (const viewer of [{ kind: "in_progress", session: "cs_test_1" }, { kind: "in_progress", session: null }, { kind: "has_access" }] as PlansViewer[]) {
+      const view = plansView(offerOf(SEED), { plan: null, returnTo: null, canceled: false }, viewer, legal);
+      if (view.kind !== "ready") throw new Error("lista");
+      expect(view.cards.map((card) => [card.plan, card.featured, card.primary]), viewer.kind).toEqual([
+        ["monthly", false, false],
+        ["annual", true, false],
+      ]);
+    }
+    // Quien paga y el visitante, sí.
+    const visitor = plansView(offerOf(SEED), { plan: null, returnTo: null, canceled: false }, { kind: "visitor", signUp: (to) => to, signIn: (to) => to }, legal);
+    expect(visitor.kind === "ready" && visitor.cards.map((card) => card.primary)).toEqual([false, true]);
+  });
+
   it("destacar no elige: sin plan en la dirección no hay «Antes de pagar», y con plan lo que se firma no lleva el ahorro", () => {
     expect(ready(offerOf(SEED)).summary).toBeNull();
     for (const plan of ["monthly", "annual"] as const) {

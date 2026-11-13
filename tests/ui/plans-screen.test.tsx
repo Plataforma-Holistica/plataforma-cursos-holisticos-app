@@ -193,6 +193,17 @@ describe("PA-04, el anual destacado (T-616, 3b-4)", () => {
     expect(await a11yViolations(container)).toEqual([]);
   });
 
+  // Revisión del carril A sobre de38193: el aviso dice que no vuelva a pagar, o que ya tiene acceso; ningún botón en oro lo contradice.
+  it("con un pago en confirmación o con acceso, el anual sigue destacado, sin botón principal", () => {
+    for (const viewer of [{ kind: "in_progress", session: "cs_test_1" }, { kind: "has_access" }] as PlansViewer[]) {
+      const { unmount } = show(null, viewer);
+      expect(within(cardOf("Anual")).getByText(text.featured)).toBeInTheDocument();
+      expect(within(cardOf("Anual")).getByText(SAVING)).toBeInTheDocument();
+      expect(document.querySelectorAll("main a.bg-accent, a.bg-accent, button.bg-accent")).toHaveLength(0);
+      unmount();
+    }
+  });
+
   it("el ahorro nunca entra en «Antes de pagar» ni en el formulario, que lleva lo de siempre", async () => {
     actions.startCheckoutAction.mockResolvedValue({ kind: "answer", answer: "changed", plan: "annual", attempt: 1 });
     const { user, container } = show("annual");

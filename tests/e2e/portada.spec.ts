@@ -144,3 +144,16 @@ test("a 320 px, la frase del ahorro cabe entera en su tarjeta, también con siet
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), path).toBe(true);
   }
 });
+
+// Revisión del carril A sobre de38193: en computadora, con el anual destacado, los títulos de las dos tarjetas a la misma altura, solo
+// con disposición (el antetítulo no cambia de lugar en el documento ni hay nada nuevo que se lea).
+test("en computadora, los títulos «Mensual» y «Anual» quedan a la misma altura, en /planes y en la portada", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  for (const path of ["/planes", "/"]) {
+    await page.goto(path);
+    const top = async (name: string) => (await page.getByRole("heading", { level: 3, name, exact: true }).boundingBox())?.y ?? Number.NaN;
+    await expect(page.getByText("Conviene más", { exact: true })).toBeVisible();
+    const [monthly, annual] = [await top("Mensual"), await top("Anual")];
+    expect(Math.abs(monthly - annual), `${path}: ${monthly} y ${annual}`).toBeLessThanOrEqual(1);
+  }
+});
