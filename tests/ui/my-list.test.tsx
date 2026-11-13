@@ -240,8 +240,8 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
 
   // Cambió por el requisito (T-616, 3b-1, y la revisión de la 3b-1): antes, montarse con el ancla en la dirección bastaba para
   // tomar el foco, también al recargar. Ahora, al montarse, solo con el ancla y además la marca de la barra (llegada dentro de
-  // la aplicación) o la primera carga del documento que no fue una recarga (llegada nativa, antes de hidratar). Y si alguien
-  // escribe el ancla a mano (`hashchange`).
+  // la aplicación) o la primera carga del documento, si fue una navegación y no una recarga ni «Atrás» (llegada nativa, antes
+  // de hidratar). Y si alguien escribe el ancla a mano (`hashchange`).
   it("al recargar con el ancla, sin haber llegado por la barra, no toma el foco", async () => {
     takeArrival();
     const restore = loadedBy("reload");
@@ -253,7 +253,7 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
     restore();
   });
 
-  it("la primera carga del documento con el ancla, que no fue una recarga, toma el foco; el montaje siguiente, no", async () => {
+  it("la primera carga del documento con el ancla, que fue una navegación, toma el foco; el montaje siguiente, no", async () => {
     takeArrival();
     const restore = loadedBy("navigate");
     window.history.replaceState(null, "", "/inicio#bloque-lista");
@@ -264,6 +264,19 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
     const again = render(page(vi.fn(), [A]));
     await frames();
     expect(again.container.querySelector("#bloque-lista")).not.toHaveFocus();
+    window.history.replaceState(null, "", "/");
+    restore();
+  });
+
+  // Revisión de la 153: una carga por «Atrás» (sin la caché de ida y vuelta, por ejemplo al volver de Stripe) no es una
+  // llegada, como la recarga.
+  it("al volver con «Atrás» a una carga nueva del documento con el ancla, sin marca, no toma el foco", async () => {
+    takeArrival();
+    const restore = loadedBy("back_forward");
+    window.history.replaceState(null, "", "/inicio#bloque-lista");
+    const { container } = render(page(vi.fn(), [A]));
+    await frames();
+    expect(container.querySelector("#bloque-lista")).not.toHaveFocus();
     window.history.replaceState(null, "", "/");
     restore();
   });

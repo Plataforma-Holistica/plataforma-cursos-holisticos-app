@@ -11,9 +11,8 @@ import { MY_LIST_ARRIVAL } from "./my-list/arrival";
 //
 // Desde la 3b-1, el clic deja además una marca de un solo uso (`takeArrival`): si el inicio todavía no está pintado (se
 // pulsó desde la cuenta, por ejemplo), el bloque la consume al montarse, siempre, y toma el foco si además la dirección trae
-// su ancla. Antes el bloque miraba solo la
-// dirección, y lo tomaba también al recargar con el ancla, sin que nadie llegara por la barra. La marca vive en este
-// módulo, en la memoria de la pestaña: se pierde al recargar, que es justo lo que se quiere, y no se comparte entre
+// su ancla. Antes el bloque miraba solo la dirección, y lo tomaba también al recargar con el ancla, sin que nadie llegara
+// por la barra. La marca vive en este módulo, en la memoria de la pestaña: se pierde al recargar, que es justo lo que se quiere, y no se comparte entre
 // pestañas (decisión mía sin confirmar; con `sessionStorage` sobreviviría a la recarga). Va en el `.tsx` y no en
 // `arrival.ts`, que tiene dueño.
 //

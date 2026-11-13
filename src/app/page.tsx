@@ -173,7 +173,7 @@ export default async function LandingPage() {
               {ready.teachers.map((teacher) => {
                 const href = teacherPath(teacher.slug);
                 if (href === null) return null;
-                return <TeacherCard key={teacher.slug} href={href} name={teacher.name} practices={teacher.practices} tone={teacher.tone} practicePosition={teacher.practicePosition} />;
+                return <TeacherCard key={teacher.slug} href={href} slug={teacher.slug} name={teacher.name} practices={teacher.practices} tone={teacher.tone} practicePosition={teacher.practicePosition} />;
               })}
             </Carousel>
           )}

@@ -74,13 +74,16 @@ const removeValue = (slug: string) => `remove:${slug}`;
  */
 const usedLoads = new WeakSet<object>();
 
-/** Si este es el primer montaje desde que cargó el documento y esa carga no fue una recarga. Sin saberlo, no. */
+/**
+ * Si este es el primer montaje desde que cargó el documento y esa carga fue una navegación (`navigate`): ni una recarga, ni
+ * «Atrás» o «Adelante» (`back_forward`, también sin la caché de ida y vuelta), ni una precarga. Sin saberlo, no.
+ */
 function firstLoad(): boolean {
   if (typeof performance === "undefined" || typeof performance.getEntriesByType !== "function") return false;
   const entry = performance.getEntriesByType("navigation")[0] as (PerformanceEntry & { type?: string }) | undefined;
   if (entry === undefined || usedLoads.has(entry)) return false;
   usedLoads.add(entry);
-  return entry.type !== undefined && entry.type !== "reload";
+  return entry.type === "navigate";
 }
 
 export function MyListBlock({ action, courses, permalink, id, offset }: MyListBlockProps) {
@@ -145,8 +148,8 @@ export function MyListBlock({ action, courses, permalink, id, offset }: MyListBl
   // Al llegar por la barra desde el mismo inicio, lo avisa el enlace, antes de que el enrutador desplace: el foco espera un
   // cuadro y no desplaza; el aviso usa también la marca, para que no quede viva para otro montaje. Al montarse, solo con el
   // ancla en la dirección y además la marca de la barra (llegada dentro de la aplicación, desde otra pantalla) o la primera
-  // carga del documento que no fue una recarga (`firstLoad`: «Mi lista» pulsada antes de hidratar navega como un enlace del
-  // navegador, sin marca). La marca se consume siempre al montarse, haya ancla o no: si quedara viva (una navegación
+  // carga del documento, si fue una navegación y no una recarga ni «Atrás» (`firstLoad`: «Mi lista» pulsada antes de
+  // hidratar navega como un enlace del navegador, sin marca). La marca se consume siempre al montarse, haya ancla o no: si quedara viva (una navegación
   // abandonada, o un inicio sin el bloque), el siguiente inicio con ancla tomaría el foco sin que nadie llegara por la barra.
   // Y si alguien escribe el ancla a mano (`hashchange`).
   useEffect(() => {

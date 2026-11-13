@@ -6,11 +6,11 @@ import { MOTIFS, motifFor } from "@/ui/motifs";
 import { PRACTICE_PHOTOS, teacherPhoto } from "@/ui/photos/choice";
 import { TeacherCard } from "@/ui/teacher-card";
 
+import { a11yViolations } from "../setup/a11y";
+
 /** El nombre de una foto importada, sin su extensión: en las pruebas la importación da su dirección; en Next, un objeto con `src`. */
 const fileOf = (photo: unknown) =>
   (String(typeof photo === "string" ? photo : (photo as { src?: string } | null)?.src ?? "").split("/").pop() ?? "").split(".")[0] ?? "";
-
-import { a11yViolations } from "../setup/a11y";
 
 // Las fichas públicas del catálogo (PA-02, PA-03; T-210), con la guarda y los servicios
 // simulados: qué pinta cada una según quién mira y lo que contesta el servicio. Qué botón le
