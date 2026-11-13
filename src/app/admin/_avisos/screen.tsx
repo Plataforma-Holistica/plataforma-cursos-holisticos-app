@@ -9,13 +9,13 @@ import { ROUTES } from "@/services/account/navigation";
 import { Button } from "@/ui/button";
 import { DataTable } from "@/ui/data-table";
 import { InlineAlert } from "@/ui/inline-alert";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { StatusBadge } from "@/ui/status-badge";
 import { Textarea } from "@/ui/textarea";
 import { TextLink } from "@/ui/text-link";
 
 import { BlockResult, useAnswerFocus } from "../_lib/answer";
 import { CodeBlock } from "../_lib/code-block";
+import { AdminMain } from "../_lib/shell";
 import { billingCodeAction, billingEventsAction } from "./actions";
 import { billingButton, type BillingFailure, type BillingState, type CodeState } from "./outcomes";
 import { errorText, type BillingRow, type BillingView } from "./rows";
@@ -144,11 +144,7 @@ export function BillingEventsScreen({ view, done = null }: BillingEventsScreenPr
   }));
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-10 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-h1">{text.title}</h1>
-        <p className="text-text-2">{text.intro}</p>
-      </div>
+    <AdminMain area="finance" title={text.title} lead={<p>{text.intro}</p>}>
       {!view.canChange && (
         <div className="hidden md:block">
           <CodeBlock
@@ -180,7 +176,7 @@ export function BillingEventsScreen({ view, done = null }: BillingEventsScreenPr
       <p className="text-body-s">
         <TextLink href={ROUTES.admin}>{text.backToAdmin}</TextLink>
       </p>
-    </main>
+    </AdminMain>
   );
 }
 

@@ -21,7 +21,7 @@ const text = messages.portal.invitation;
 
 function TextBlock({ item }: { item: TeacherText }) {
   return (
-    <section className="flex flex-col gap-2 rounded-md border border-border p-4">
+    <section className="flex flex-col gap-2 surface-raised p-4 sm:p-5">
       <LegalBody title={item.title} blocks={legalBlocks(item.body)} />
       <p className="text-small text-text-2">{t(text.version, { version: item.version, date: longDate(item.effectiveFrom) })}</p>
     </section>

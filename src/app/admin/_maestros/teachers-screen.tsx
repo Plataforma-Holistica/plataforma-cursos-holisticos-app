@@ -9,13 +9,13 @@ import { Button } from "@/ui/button";
 import { DataTable } from "@/ui/data-table";
 import { type FormError, FormErrorSummary } from "@/ui/form-error-summary";
 import { InlineAlert } from "@/ui/inline-alert";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { StatusBadge } from "@/ui/status-badge";
 import { TextField } from "@/ui/text-field";
 import { TextLink } from "@/ui/text-link";
 
 import { BlockResult, useAnswerFocus } from "../_lib/answer";
 import { CodeBlock } from "../_lib/code-block";
+import { AdminMain } from "../_lib/shell";
 import { teachersAction, teachersCodeAction } from "./actions";
 import type { CodeState, TeachersState } from "./outcomes";
 import { FAILURES, focusIsLost } from "./parts";
@@ -79,12 +79,7 @@ export function TeachersScreen({ view, done = null }: { view: RosterView; done?:
   ];
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-10 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-h1">{t(text.title)}</h1>
-        <p className="text-text-2">{text.intro}</p>
-      </div>
-
+    <AdminMain area="content" title={t(text.title)} lead={<p>{text.intro}</p>}>
       {!view.canChange && (
         <CodeBlock
           blockId={CODE_BLOCK_ID}
@@ -99,14 +94,14 @@ export function TeachersScreen({ view, done = null }: { view: RosterView; done?:
       )}
 
       {view.requests.length > 0 && (
-        <section aria-labelledby="maestros-propuestas" className="flex flex-col gap-4">
-          <h2 id="maestros-propuestas" className="text-h2">
+        <section aria-labelledby="maestros-propuestas" className="flex max-w-reading flex-col gap-4">
+          <h2 id="maestros-propuestas" className="text-h3">
             {text.requests.title}
           </h2>
           <p className="text-text-2">{text.requests.body}</p>
-          <ul className="flex flex-col gap-3">
+          <ul className="surface-raised divide-y divide-border">
             {view.requests.map((request) => (
-              <li key={request.id} className="flex flex-col gap-1 rounded-md border border-border p-4">
+              <li key={request.id} className="flex flex-col gap-1 p-4 sm:px-5">
                 <p className="font-semibold">{request.title}</p>
                 <p className="text-body-s text-text-2">{request.proposed}</p>
                 <p className="break-words whitespace-pre-line">{request.reason}</p>
@@ -120,20 +115,56 @@ export function TeachersScreen({ view, done = null }: { view: RosterView; done?:
       )}
 
       <section ref={block} id={LIST_BLOCK_ID} tabIndex={-1} aria-labelledby="maestros-lista" className="flex flex-col gap-6 outline-none">
-        <h2 id="maestros-lista" className="text-h2">
-          {text.list.title}
-        </h2>
-        {!view.canChange && <p className="text-body-s text-text-2">{text.changeLocked}</p>}
-        {done !== null && state.kind === "idle" && (
-          <div ref={doneBox} tabIndex={-1} className="outline-none">
-            <InlineAlert tone="success">{DONE[done]}</InlineAlert>
-          </div>
-        )}
-        <BlockResult message={result} tone={tone} pending={pending} pendingText={text.working} answer={answer} spoken={spoken} />
+        {/* El título, lo que contestó el último envío y la tabla van juntos: entre «Todos» y su tabla no queda hueco
+            (T-616, solicitud 6). Invitar va después de la lista, angosto: lo de todos los días es buscar a alguien. */}
+        <div className="flex flex-col gap-3">
+          <h2 id="maestros-lista" className="text-h3">
+            {text.list.title}
+          </h2>
+          {!view.canChange && <p className="text-body-s text-text-2">{text.changeLocked}</p>}
+          {done !== null && state.kind === "idle" && (
+            <div ref={doneBox} tabIndex={-1} className="outline-none">
+              <InlineAlert tone="success">{DONE[done]}</InlineAlert>
+            </div>
+          )}
+          <BlockResult message={result} tone={tone} pending={pending} pendingText={text.working} answer={answer} spoken={spoken} />
+          <form action={send} noValidate>
+            <DataTable
+              caption={t(text.list.caption)}
+              captionHidden
+              columns={[
+                { key: "name", header: text.list.name },
+                { key: "email", header: text.list.email },
+                { key: "status", header: text.list.status },
+                { key: "founder", header: text.list.founder },
+                { key: "taxData", header: text.list.taxData },
+                { key: "invitation", header: text.list.invitation },
+              ]}
+              rows={view.rows.map((row) => ({
+                key: row.id,
+                cells: {
+                  name: (
+                    <>
+                      <TextLink href={row.href}>{row.name}</TextLink>
+                      {row.isSelf && <span className="block text-body-s text-text-2">{text.list.self}</span>}
+                    </>
+                  ),
+                  email: row.email ?? text.list.noEmail,
+                  status: <StatusBadge tone={row.status.tone}>{row.status.label}</StatusBadge>,
+                  founder: row.founder ?? text.list.notFounder,
+                  taxData: row.taxData,
+                  invitation: <InvitationCell row={row} canChange={view.canChange} pending={pending} />,
+                },
+              }))}
+              empty={t(text.list.empty)}
+              scroll
+            />
+          </form>
+        </div>
 
         {view.canChange && (
-          <form action={send} noValidate className="flex flex-col gap-4 rounded-md border border-border p-4">
-            <h3 className="text-h3">{t(text.invite.title)}</h3>
+          <form action={send} noValidate className="flex max-w-reading flex-col gap-4 surface-raised p-4 sm:p-5">
+            <h3 className="text-body-l font-semibold">{t(text.invite.title)}</h3>
             <p className="text-body-s text-text-2">{text.invite.body}</p>
             <FormErrorSummary errors={errors} attempt={round} />
             <TextField
@@ -166,44 +197,12 @@ export function TeachersScreen({ view, done = null }: { view: RosterView; done?:
             </div>
           </form>
         )}
-
-        <form action={send} noValidate>
-          <DataTable
-            caption={t(text.list.caption)}
-            columns={[
-              { key: "name", header: text.list.name },
-              { key: "email", header: text.list.email },
-              { key: "status", header: text.list.status },
-              { key: "founder", header: text.list.founder },
-              { key: "taxData", header: text.list.taxData },
-              { key: "invitation", header: text.list.invitation },
-            ]}
-            rows={view.rows.map((row) => ({
-              key: row.id,
-              cells: {
-                name: (
-                  <>
-                    <TextLink href={row.href}>{row.name}</TextLink>
-                    {row.isSelf && <span className="block text-body-s text-text-2">{text.list.self}</span>}
-                  </>
-                ),
-                email: row.email ?? text.list.noEmail,
-                status: <StatusBadge tone={row.status.tone}>{row.status.label}</StatusBadge>,
-                founder: row.founder ?? text.list.notFounder,
-                taxData: row.taxData,
-                invitation: <InvitationCell row={row} canChange={view.canChange} pending={pending} />,
-              },
-            }))}
-            empty={t(text.list.empty)}
-            scroll
-          />
-        </form>
       </section>
 
       <p className="text-body-s">
         <TextLink href={ROUTES.admin}>{text.backToAdmin}</TextLink>
       </p>
-    </main>
+    </AdminMain>
   );
 }
 

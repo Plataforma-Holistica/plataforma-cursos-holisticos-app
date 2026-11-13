@@ -79,13 +79,13 @@ export function MembersBlock({ members, canChange, state, action, pending }: Mem
         spoken={spoken}
       />
       <form action={action} className="flex flex-col gap-4">
-        <ul className="flex flex-col gap-3">
+        <ul className="surface-raised divide-y divide-border">
           {members.map((member) => {
             const confirmation = confirmationOf(member);
             const buttons = member.capabilities.filter((row) => row.button !== null);
             const locks = [...new Set(member.capabilities.map((row) => row.locked).filter((reason) => reason !== null))];
             return (
-              <li key={member.id} className="flex flex-col gap-3 rounded-md border border-border p-4">
+              <li key={member.id} className="flex flex-col gap-3 p-4 sm:px-5">
                 <div className="flex flex-col gap-1">
                   <p className="text-body font-semibold break-all">
                     {member.email}

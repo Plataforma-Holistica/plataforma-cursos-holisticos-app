@@ -115,8 +115,8 @@ export function VideoBlock({ course, lesson, row, editable, maxBytes, maxText }:
   const held = row?.state === "uploaded" ? blocked[row.id] : undefined;
 
   return (
-    <section ref={section} tabIndex={-1} aria-labelledby={`video-${lesson}`} className="flex flex-col gap-3 outline-none">
-      <h3 id={`video-${lesson}`} className="text-h3">
+    <section ref={section} tabIndex={-1} aria-labelledby={`video-${lesson}`} className="flex flex-col gap-3 surface-raised p-4 outline-none sm:p-5">
+      <h3 id={`video-${lesson}`} className="text-body-l font-semibold">
         {text.title}
       </h3>
 

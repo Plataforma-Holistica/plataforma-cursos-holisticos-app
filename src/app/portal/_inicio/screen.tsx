@@ -4,9 +4,11 @@ import { portal } from "@/messages/es/portal";
 import { ui } from "@/messages/es/ui";
 import { ROUTES } from "@/services/account/navigation";
 import { DataTable } from "@/ui/data-table";
+import { FlowerState } from "@/ui/flower-state";
 import { InlineAlert } from "@/ui/inline-alert";
 import { PeriodBars } from "@/ui/period-bars";
 import { StatTile } from "@/ui/stat-tile";
+import { StatusBadge } from "@/ui/status-badge";
 import { TextLink } from "@/ui/text-link";
 
 import type { CourseRowView, DashboardView, FirstStep } from "./outcomes";
@@ -20,7 +22,7 @@ const text = portal.home;
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
     <section aria-labelledby={`${id}-titulo`} className="flex flex-col gap-4">
-      <h2 id={`${id}-titulo`} className="text-h2">
+      <h2 id={`${id}-titulo`} className="text-h3">
         {title}
       </h2>
       {children}
@@ -32,21 +34,22 @@ function FirstTime({ steps }: { steps: readonly FirstStep[] }) {
   return (
     <>
       <Section id="para-empezar" title={text.firstTime.title}>
-        <ol className="flex max-w-reading list-decimal flex-col gap-3 pl-6">
-          {steps.map((step) => (
-            <li key={step.key}>
-              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                {step.href === null ? <span>{step.label}</span> : <TextLink href={step.href}>{step.label}</TextLink>}
-                {step.state !== null && <span className="text-body-s text-text-2">{step.state}</span>}
-              </span>
-            </li>
-          ))}
-        </ol>
+        {/* Los pasos en una sola pieza, con su número en el oro apagado y su estado a la derecha: lo pendiente se ve de un vistazo. */}
+        <div className="max-w-reading surface-raised p-4 sm:p-5">
+          <ol className="flex list-decimal flex-col gap-4 pl-6 marker:font-semibold marker:text-accent-muted">
+            {steps.map((step) => (
+              <li key={step.key} className="pl-1">
+                <span className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                  {step.href === null ? <span>{step.label}</span> : <TextLink href={step.href}>{step.label}</TextLink>}
+                  {step.state !== null && step.tone !== null && <StatusBadge tone={step.tone}>{step.state}</StatusBadge>}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
       </Section>
-      <div className="flex max-w-reading flex-col items-start gap-3 rounded-md border border-border p-4">
-        <p className="text-text-2">{text.noCourseYet}</p>
-        <TextLink href={ROUTES.portalCourses}>{text.courses}</TextLink>
-      </div>
+      {/* Todavía sin cifras: el vacío dice qué hacer, con la semilla. */}
+      <FlowerState title={text.noCourseYet} action={<TextLink href={ROUTES.portalCourses}>{text.courses}</TextLink>} className="max-w-reading surface-raised" />
     </>
   );
 }
@@ -98,9 +101,9 @@ function Courses({ courses }: { courses: readonly CourseRowView[] }) {
           empty={text.noCourses}
         />
       </div>
-      <ul aria-label={text.coursesCaption} className="flex flex-col gap-4 md:hidden">
+      <ul aria-label={text.coursesCaption} className="surface-raised divide-y divide-border md:hidden">
         {courses.map((course) => (
-          <li key={course.key} className="flex flex-col gap-3 rounded-md border border-border p-4">
+          <li key={course.key} className="flex flex-col gap-3 p-4">
             <p className="font-semibold">
               <CourseTitle course={course} />
             </p>
@@ -131,7 +134,7 @@ export function DashboardPanel({ view }: { view: DashboardView }) {
     <>
       <section aria-labelledby="mes-titulo" className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
-          <h2 id="mes-titulo" className="text-h2">
+          <h2 id="mes-titulo" className="text-h3">
             {view.month}
           </h2>
           {view.updated !== null && <p className="text-body-s text-text-2">{view.updated}</p>}

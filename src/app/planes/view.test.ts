@@ -1,8 +1,9 @@
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import type { Offer } from "@/services/billing/checkout";
 
-import { plansView, type PlansViewer } from "./view";
+import { planCardText, plansView, showcaseView, type PlansViewer } from "./view";
 
 const OFFER: Offer = {
   plans: [
@@ -27,7 +28,8 @@ describe("PA-04, la vista", () => {
       ["annual", false, "/planes?plan=annual#bloque-pagar"],
     ]);
     expect(view.summary).toBeNull();
-    expect(view.cards[1]?.equivalent).toBe("Equivale a $290.83 al mes.");
+    // Hacia arriba (decisión de Sergio del 2026-11-12): antes decía $290.83.
+    expect(view.cards[1]?.equivalent).toBe("Equivale a $290.84 al mes.");
   });
 
   it("con el plan elegido, el formulario lleva el monto y el texto que se ven", () => {
@@ -76,5 +78,69 @@ describe("PA-04, la vista", () => {
   it("un texto publicado no lleva la nota de borrador", () => {
     const view = plansView({ ...OFFER, recurring: { ...OFFER.recurring!, version: 1 } }, { plan: "monthly", returnTo: null, canceled: false }, PAY, legal);
     expect(view.kind === "ready" && view.summary?.draft).toBe(false);
+  });
+});
+
+describe("la vitrina de la portada (T-616, solicitud 4b)", () => {
+  const READY = { kind: "ready" as const, plans: OFFER.plans.map(({ plan, amountCents }) => ({ plan, amountCents })), recurringVersion: 0 };
+
+  it("cada tarjeta de la portada dice lo mismo que la de /planes, para la misma oferta", () => {
+    const plan = fc.record({ plan: fc.constantFrom("monthly" as const, "annual" as const), amountCents: fc.integer({ min: 1, max: 10_000_000 }) });
+    fc.assert(
+      fc.property(fc.uniqueArray(plan, { minLength: 1, maxLength: 2, selector: (each) => each.plan }), (plans) => {
+        const offer: Offer = { ...OFFER, plans: plans.map((each) => ({ ...each, lookupKey: "x", nextChargeAt: "2026-12-10T18:00:00Z" })) };
+        const shown = showcaseView({ kind: "ready", plans, recurringVersion: OFFER.recurring!.version }, legal);
+        const page = plansView(offer, { plan: null, returnTo: null, canceled: false }, PAY, legal);
+        if (shown.kind !== "ready" || page.kind !== "ready") return false;
+        const pick = (card: { plan: string; name: string; price: string; repeat: string; equivalent: string | null; href: string; chooseLabel: string }) => ({
+          plan: card.plan,
+          name: card.name,
+          price: card.price,
+          repeat: card.repeat,
+          equivalent: card.equivalent,
+          href: card.href,
+          chooseLabel: card.chooseLabel,
+        });
+        expect(shown.cards.map(pick)).toEqual(page.cards.map(pick));
+        return true;
+      }),
+    );
+  });
+
+  it("el equivalente solo se dice de un total que es un entero positivo de centavos", () => {
+    expect(planCardText("annual", 299000).equivalent).toBe("Equivale a $249.17 al mes.");
+    for (const amount of [0, -1, -299000, 1.5, Number.NaN]) expect(planCardText("annual", amount).equivalent, String(amount)).toBeNull();
+  });
+
+  it("con los dos planes: una tarjeta por plan, cada una a elegirlo en /planes, sin el monto en la dirección", () => {
+    const view = showcaseView(READY, legal);
+    expect(view.kind).toBe("ready");
+    if (view.kind !== "ready") return;
+    expect(view.cards.map((card) => [card.plan, card.href])).toEqual([
+      ["monthly", "/planes?plan=monthly#bloque-pagar"],
+      ["annual", "/planes?plan=annual#bloque-pagar"],
+    ]);
+    expect(view.cards[0]?.equivalent).toBeNull();
+    expect(view.cards[1]?.equivalent).toBe("Equivale a $290.84 al mes.");
+    for (const card of view.cards) expect(card.href).not.toMatch(/\d{3}/);
+    // Cada enlace con su propio nombre.
+    expect(new Set(view.cards.map((card) => card.chooseLabel)).size).toBe(2);
+  });
+
+  it("con un solo plan a la venta, una tarjeta", () => {
+    const view = showcaseView({ ...READY, plans: [READY.plans[1]!] }, legal);
+    expect(view.kind === "ready" && view.cards.map((card) => card.plan)).toEqual(["annual"]);
+  });
+
+  it("sin venta, con el criterio de /planes: sin planes, sin texto del cobro recurrente o sin su página, no se muestra", () => {
+    expect(showcaseView({ ...READY, plans: [] }, legal)).toEqual({ kind: "hidden" });
+    expect(showcaseView({ ...READY, recurringVersion: null }, legal)).toEqual({ kind: "hidden" });
+    expect(showcaseView(READY, () => null)).toEqual({ kind: "hidden" });
+    // Y /planes dice lo mismo de esa oferta.
+    expect(plansView({ ...OFFER, recurring: null }, { plan: null, returnTo: null, canceled: false }, PAY, legal)).toEqual({ kind: "not_for_sale" });
+  });
+
+  it("si no se supo, sin cifras", () => {
+    expect(showcaseView({ kind: "unavailable" }, legal)).toEqual({ kind: "unavailable" });
   });
 });

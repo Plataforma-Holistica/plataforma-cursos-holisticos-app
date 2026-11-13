@@ -8,14 +8,15 @@ import { t } from "@/messages/format";
 import { ROUTES } from "@/services/account/navigation";
 import { Button } from "@/ui/button";
 import { SPACE } from "@/ui/cx";
+import { FlowerState } from "@/ui/flower-state";
 import { InlineAlert } from "@/ui/inline-alert";
 import { Select } from "@/ui/select";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { Textarea } from "@/ui/textarea";
 import { TextLink } from "@/ui/text-link";
 
 import { BlockResult, useAnswerFocus } from "../_lib/answer";
 import { CodeBlock } from "../_lib/code-block";
+import { AdminMain } from "../_lib/shell";
 import { alertsAction, alertsCodeAction } from "./actions";
 import type { AlertsFailure, AlertsState, CodeState, ConfirmProblem, Confirming, Drafts } from "./outcomes";
 import type { AccountRow, AlertCard, AlertsView, ExclusionRow } from "./rows";
@@ -126,11 +127,7 @@ export function AlertsScreen({ view, done = null }: AlertsScreenProps) {
   const showDone = done !== null && list.kind === "idle" && !listPending;
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-10 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-h1">{text.title}</h1>
-        <p className="text-text-2">{text.intro}</p>
-      </div>
+    <AdminMain area="finance" title={text.title} lead={<p>{text.intro}</p>} measure="reading">
       {!view.canChange && (
         <CodeBlock
           blockId={CODE_BLOCK_ID}
@@ -145,7 +142,7 @@ export function AlertsScreen({ view, done = null }: AlertsScreenProps) {
       )}
 
       <section ref={block} id={LIST_BLOCK_ID} aria-labelledby={LIST_HEADING_ID} tabIndex={-1} className="flex flex-col gap-6 outline-none">
-        <h2 id={LIST_HEADING_ID} className="text-h2">
+        <h2 id={LIST_HEADING_ID} className="text-h3">
           {text.listTitle}
         </h2>
         {!view.canChange && <p className="text-body-s text-text-2">{text.changeLocked}</p>}
@@ -156,7 +153,7 @@ export function AlertsScreen({ view, done = null }: AlertsScreenProps) {
         )}
         <BlockResult message={result} tone={tone} pending={listPending} pendingText={text.working} answer={answer} spoken={spoken} />
         {view.alerts.length === 0 ? (
-          <p className="text-text-2">{text.empty}</p>
+          <FlowerState title={text.empty} className="surface-raised" />
         ) : (
           <ol className="flex flex-col gap-6">
             {view.alerts.map((alert) => (
@@ -180,7 +177,7 @@ export function AlertsScreen({ view, done = null }: AlertsScreenProps) {
       <p className="text-body-s">
         <TextLink href={ROUTES.admin}>{text.backToAdmin}</TextLink>
       </p>
-    </main>
+    </AdminMain>
   );
 }
 
@@ -230,9 +227,9 @@ function Alert({ alert, canChange, confirming, note, limits, answer, action, pen
   const askingProposal = asking("propose");
   return (
     <li>
-      <article aria-labelledby={headingId} className="flex flex-col gap-5 rounded-md border border-border p-4">
+      <article aria-labelledby={headingId} className="flex flex-col gap-5 surface-raised p-4 sm:p-5">
         <div className="flex flex-col gap-1">
-          <h3 id={headingId} className="text-h3 break-words">
+          <h3 id={headingId} className="text-body-l font-semibold break-words">
             {alert.title}
           </h3>
           <p className="text-body-s font-semibold">{alert.status}</p>

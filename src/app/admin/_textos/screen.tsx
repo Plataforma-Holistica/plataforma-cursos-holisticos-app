@@ -12,12 +12,12 @@ import { Button } from "@/ui/button";
 import { type FormError, FormErrorSummary } from "@/ui/form-error-summary";
 import { InlineAlert } from "@/ui/inline-alert";
 import { SPACE } from "@/ui/cx";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextField } from "@/ui/text-field";
 import { Textarea } from "@/ui/textarea";
 import { TextLink } from "@/ui/text-link";
 
 import { CodeBlock } from "../_lib/code-block";
+import { AdminMain } from "../_lib/shell";
 import { legalAction, legalCodeAction } from "./actions";
 import {
   legalButton,
@@ -100,11 +100,7 @@ export function LegalScreen({ view, done }: LegalScreenProps) {
   const canPublish = view.canChange && view.today !== null;
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-10 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-h1">{text.title}</h1>
-        <p className="text-text-2">{text.intro}</p>
-      </div>
+    <AdminMain area="config" title={text.title} lead={<p>{text.intro}</p>} measure="reading">
       {done && state.kind === "idle" && (
         <InlineAlert tone="success" live>
           {text.published}
@@ -143,7 +139,7 @@ export function LegalScreen({ view, done }: LegalScreenProps) {
       <p className="text-body-s">
         <TextLink href={ROUTES.admin}>{text.backToAdmin}</TextLink>
       </p>
-    </main>
+    </AdminMain>
   );
 }
 
@@ -160,7 +156,7 @@ function DocumentSection({ document, state, send, pending, canPublish }: Section
   const open = (state.kind === "composing" || state.kind === "previewing") && state.draft.docType === document.docType;
 
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3 rounded-md border border-border p-4">
+    <section aria-labelledby={headingId} className="flex flex-col gap-3 surface-raised p-4 sm:p-5">
       <h2 id={headingId} className="text-h3">
         {document.name}
       </h2>
@@ -293,7 +289,8 @@ function Preview({ document, state, send, pending }: { document: DocumentView; s
         <p>{text.preview.irreversible}</p>
       </InlineAlert>
       <p className="text-text-2">{state.when}</p>
-      <div className="flex flex-col gap-4 rounded-md border border-border p-4">
+      {/* La vista previa va hundida en su ficha (una pieza dentro de otra): el segundo tono de superficie, sin borde. */}
+      <div className="flex flex-col gap-4 rounded-md bg-surface-2 p-4">
         <p className="text-h2">{draft.title}</p>
         <LegalBody title={draft.title} blocks={state.blocks} />
       </div>

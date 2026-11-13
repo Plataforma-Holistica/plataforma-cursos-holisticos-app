@@ -11,12 +11,12 @@ import { PublicHeader } from "@/app/_public/header";
 import { plans as text } from "@/messages/es/plans";
 import { resolveDestination, signInPath, signUpPath } from "@/services/account/navigation";
 import { planOffer, planStanding } from "@/services/billing/checkout-service";
-import { slugOfDocType } from "@/services/legal/texts";
 import { cx } from "@/ui/cx";
 import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
 
+import { plansLegalHref as legalHref } from "./legal-href";
 import { closedPlansDetour, plansHref, readPlansQuery } from "./outcomes";
 import { PlansScreen } from "./screen";
 import { plansView, type PlansViewer } from "./view";
@@ -39,12 +39,6 @@ type Search = Record<string, string | string[] | undefined>;
 function returnOf(input: string): string | null {
   const resolved = resolveDestination(input);
   return resolved === input ? resolved : null;
-}
-
-function legalHref(doc: "recurring" | "refund", version: number | null): string | null {
-  const slug = slugOfDocType(doc === "recurring" ? "recurring_charge_consent" : "refund_policy");
-  if (slug === null) return null;
-  return version === null ? `/legal/${slug}` : `/legal/${slug}?v=${version}`;
 }
 
 export default async function PlansPage({ searchParams }: { searchParams: Promise<Search> }) {

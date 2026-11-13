@@ -70,9 +70,9 @@ export function InvitationsBlock({ invitations, canChange, state, action, pendin
         <p className="text-body-s text-text-2">{text.noInvitations}</p>
       ) : (
         <form action={action} className="flex flex-col gap-4">
-          <ul className="flex flex-col gap-3">
+          <ul className="surface-raised divide-y divide-border">
             {invitations.map((invitation) => (
-              <li key={invitation.id} className="flex flex-col gap-3 rounded-md border border-border p-4">
+              <li key={invitation.id} className="flex flex-col gap-3 p-4 sm:px-5">
                 <div className="flex flex-col gap-1">
                   <p className="text-body font-semibold break-all">{invitation.email}</p>
                   <p className="text-body-s">{invitation.what}</p>

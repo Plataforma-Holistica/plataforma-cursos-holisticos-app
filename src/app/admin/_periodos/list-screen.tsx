@@ -1,9 +1,10 @@
 import { admin } from "@/messages/es/admin";
 import { ROUTES } from "@/services/account/navigation";
 import { DataTable } from "@/ui/data-table";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { StatusBadge } from "@/ui/status-badge";
 import { TextLink } from "@/ui/text-link";
+
+import { AdminMain } from "../_lib/shell";
 
 import type { PeriodListRow } from "./rows";
 
@@ -44,15 +45,11 @@ export function PeriodsScreen({ view }: { view: { rows: PeriodListRow[] } }) {
     },
   }));
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-8 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-h1">{text.title}</h1>
-        <p className="text-text-2">{text.intro}</p>
-      </div>
+    <AdminMain area="finance" title={text.title} lead={<p>{text.intro}</p>}>
       <DataTable caption={text.listCaption} captionHidden columns={COLUMNS} rows={rows} empty={text.empty} scroll />
       <p className="text-body-s">
         <TextLink href={ROUTES.admin}>{text.backToAdmin}</TextLink>
       </p>
-    </main>
+    </AdminMain>
   );
 }

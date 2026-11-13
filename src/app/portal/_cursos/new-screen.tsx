@@ -10,6 +10,7 @@ import { FormErrorSummary } from "@/ui/form-error-summary";
 import { InlineAlert } from "@/ui/inline-alert";
 
 import { CountedField } from "@/ui/counted-field";
+import { PortalMain } from "../_lib/shell";
 import { failureText, problemText } from "../_lib/words";
 import { createCourseAction } from "./actions";
 import type { NewCourseState } from "./outcomes";
@@ -30,41 +31,37 @@ export function NewCourseScreen({ token }: { token: string }) {
   const error = state.kind === "invalid" ? problemText("courseTitle", state.problem) : null;
 
   return (
-    <section id={BLOCK_ID} aria-labelledby="curso-nuevo-encabezado" className="flex max-w-form flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h1 id="curso-nuevo-encabezado" className="text-h1">
-          {text.title}
-        </h1>
-        <p className="text-text-2">{text.intro}</p>
-      </div>
-      <form action={action} className="flex flex-col gap-6">
-        <FormErrorSummary errors={error ? [{ fieldId: FIELD_ID, message: error }] : []} attempt={state.kind === "idle" ? 0 : state.attempt} />
-        {state.kind === "failed" && (
-          <InlineAlert tone="danger" live>
-            {failureText(state.reason)}
-          </InlineAlert>
-        )}
-        <input type="hidden" name="token" value={state.kind === "idle" ? token : state.token} />
-        <CountedField
-          key={state.kind === "idle" ? "inicio" : `intento-${state.attempt}`}
-          id={FIELD_ID}
-          name="title"
-          label={text.titleLabel}
-          max={DRAFT_TEXT_LIMITS.courseTitle}
-          warnAt={WARN_AT}
-          defaultValue={title}
-          error={error}
-          readOnly={pending}
-        />
-        <div className="flex flex-wrap gap-3">
-          <Button href={ROUTES.portalCourses} variant="secondary">
-            {text.cancel}
-          </Button>
-          <Button type="submit" loading={pending} loadingLabel={text.creating}>
-            {text.create}
-          </Button>
-        </div>
-      </form>
-    </section>
+    <PortalMain title={text.title} titleId="curso-nuevo-encabezado" lead={<p>{text.intro}</p>} measure="reading">
+      <section id={BLOCK_ID} aria-labelledby="curso-nuevo-encabezado" className="flex max-w-form flex-col gap-6">
+        <form action={action} className="flex flex-col gap-6 surface-raised p-4 sm:p-5">
+          <FormErrorSummary errors={error ? [{ fieldId: FIELD_ID, message: error }] : []} attempt={state.kind === "idle" ? 0 : state.attempt} />
+          {state.kind === "failed" && (
+            <InlineAlert tone="danger" live>
+              {failureText(state.reason)}
+            </InlineAlert>
+          )}
+          <input type="hidden" name="token" value={state.kind === "idle" ? token : state.token} />
+          <CountedField
+            key={state.kind === "idle" ? "inicio" : `intento-${state.attempt}`}
+            id={FIELD_ID}
+            name="title"
+            label={text.titleLabel}
+            max={DRAFT_TEXT_LIMITS.courseTitle}
+            warnAt={WARN_AT}
+            defaultValue={title}
+            error={error}
+            readOnly={pending}
+          />
+          <div className="flex flex-wrap gap-3">
+            <Button href={ROUTES.portalCourses} variant="secondary">
+              {text.cancel}
+            </Button>
+            <Button type="submit" loading={pending} loadingLabel={text.creating}>
+              {text.create}
+            </Button>
+          </div>
+        </form>
+      </section>
+    </PortalMain>
   );
 }
