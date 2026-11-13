@@ -7,6 +7,7 @@ import { ROUTES } from "@/services/account/navigation";
 import { BackLink } from "@/ui/back-link";
 import { cx } from "@/ui/cx";
 import { DataTable } from "@/ui/data-table";
+import { FlowerState } from "@/ui/flower-state";
 import { Icon } from "@/ui/icon";
 import { InlineAlert } from "@/ui/inline-alert";
 import { StatTile } from "@/ui/stat-tile";
@@ -14,6 +15,7 @@ import { StatusBadge } from "@/ui/status-badge";
 import { TextLink } from "@/ui/text-link";
 
 import { PortalFrame } from "../_lib/frame";
+import { PortalMain } from "../_lib/shell";
 import { CsvDownload } from "./download";
 import { DOWNLOAD_BLOCK_ID } from "./outcomes";
 import type { PayoutRowView, PayoutsView, ReportView } from "./rows";
@@ -66,65 +68,64 @@ const COLUMNS = [
 export function PayoutsScreen({ view, readOnly }: { view: PayoutsView; readOnly: boolean }) {
   return (
     <PortalFrame current={ROUTES.portalPayouts} readOnly={readOnly}>
-      <div className="flex max-w-reading flex-col gap-3">
-        <h1 className="text-h1">{text.title}</h1>
-        <p className="text-text-2">{text.intro}</p>
-      </div>
-      {view.taxDataMissing && (
-        <InlineAlert tone="warning">
-          {text.taxDataMissing} <TextLink href={ROUTES.portalTaxData}>{text.taxDataLink}</TextLink>
-        </InlineAlert>
-      )}
-      {view.balance !== null && (
-        <div className="max-w-xs">
-          <StatTile label={text.balance} value={view.balance.amount} context={view.balance.context} />
-        </div>
-      )}
-      {view.rows.length === 0 ? (
-        <p className="text-text-2">{text.empty}</p>
-      ) : (
-        <>
-          {/* Escritorio: la tabla. Teléfono: tarjetas, la más reciente primero, con la acción a todo el ancho. */}
-          <div className="hidden md:block">
-            <DataTable
-              caption={text.caption}
-              captionHidden
-              columns={COLUMNS}
-              rows={view.rows.map((row) => ({
-                key: row.key,
-                cells: {
-                  period: row.period,
-                  status: <RowStatus row={row} />,
-                  pool: row.pool,
-                  extras: row.extras,
-                  net: row.net,
-                  action: <RowAction row={row} />,
-                },
-              }))}
-              empty={text.empty}
-            />
+      <PortalMain title={text.title} section lead={<p>{text.intro}</p>}>
+        {view.taxDataMissing && (
+          <InlineAlert tone="warning">
+            {text.taxDataMissing} <TextLink href={ROUTES.portalTaxData}>{text.taxDataLink}</TextLink>
+          </InlineAlert>
+        )}
+        {view.balance !== null && (
+          <div className="max-w-xs">
+            <StatTile label={text.balance} value={view.balance.amount} context={view.balance.context} />
           </div>
-          <ul aria-label={text.caption} className="flex flex-col gap-4 md:hidden">
-            {view.rows.map((row) => (
-              <li key={row.key} className="flex flex-col gap-3 rounded-md border border-border p-4">
-                <p className="font-semibold">{row.period}</p>
-                <RowStatus row={row} />
-                <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-body-s">
-                  <dt className="text-text-2">{text.columns.pool}</dt>
-                  <dd className="text-right tabular-nums">{row.pool}</dd>
-                  <dt className="text-text-2">{text.columns.extras}</dt>
-                  <dd className="text-right tabular-nums">{row.extras}</dd>
-                  <dt className="text-text-2">{text.columns.net}</dt>
-                  <dd className="text-right tabular-nums">{row.net}</dd>
-                </dl>
-                <div className="flex min-h-touch w-full items-center">
-                  <RowAction row={row} />
-                </div>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+        )}
+        {view.rows.length === 0 ? (
+          // Sin liquidaciones todavía: el vacío, con la semilla.
+          <FlowerState title={text.empty} className="surface-raised" />
+        ) : (
+          <>
+            {/* Escritorio: la tabla. Teléfono: tarjetas, la más reciente primero, con la acción a todo el ancho. */}
+            <div className="hidden md:block">
+              <DataTable
+                caption={text.caption}
+                captionHidden
+                columns={COLUMNS}
+                rows={view.rows.map((row) => ({
+                  key: row.key,
+                  cells: {
+                    period: row.period,
+                    status: <RowStatus row={row} />,
+                    pool: row.pool,
+                    extras: row.extras,
+                    net: row.net,
+                    action: <RowAction row={row} />,
+                  },
+                }))}
+                empty={text.empty}
+              />
+            </div>
+            <ul aria-label={text.caption} className="surface-raised divide-y divide-border md:hidden">
+              {view.rows.map((row) => (
+                <li key={row.key} className="flex flex-col gap-3 p-4">
+                  <p className="font-semibold">{row.period}</p>
+                  <RowStatus row={row} />
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-body-s">
+                    <dt className="text-text-2">{text.columns.pool}</dt>
+                    <dd className="text-right tabular-nums">{row.pool}</dd>
+                    <dt className="text-text-2">{text.columns.extras}</dt>
+                    <dd className="text-right tabular-nums">{row.extras}</dd>
+                    <dt className="text-text-2">{text.columns.net}</dt>
+                    <dd className="text-right tabular-nums">{row.net}</dd>
+                  </dl>
+                  <div className="flex min-h-touch w-full items-center">
+                    <RowAction row={row} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </PortalMain>
     </PortalFrame>
   );
 }
@@ -149,7 +150,7 @@ function Steps({ view }: { view: ReportView }) {
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
     <section aria-labelledby={`${id}-titulo`} className="flex flex-col gap-4">
-      <h2 id={`${id}-titulo`} className="text-h2">
+      <h2 id={`${id}-titulo`} className="text-h3">
         {title}
       </h2>
       {children}
@@ -159,7 +160,7 @@ function Section({ id, title, children }: { id: string; title: string; children:
 
 function Amounts({ lines }: { lines: readonly { key: string; label: string; amount: string; total?: boolean }[] }) {
   return (
-    <dl className="flex max-w-reading flex-col">
+    <dl className="flex max-w-reading flex-col surface-raised p-4 sm:p-5">
       {lines.map((line) => (
         <div key={line.key} className={cx("flex justify-between gap-4 py-1", line.total === true && "border-t border-border pt-2 font-semibold")}>
           <dt>{line.label}</dt>
@@ -179,104 +180,102 @@ const STUDENT_COLUMNS = [
 export function ReportScreen({ view, page, readOnly }: { view: ReportView; page: string; readOnly: boolean }) {
   return (
     <PortalFrame current={ROUTES.portalPayouts} readOnly={readOnly}>
-      <div className="flex flex-col gap-3">
-        <BackLink href={ROUTES.portalPayouts}>{text.back}</BackLink>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-h1">{view.title}</h1>
-          <StatusBadge tone={view.status.tone}>{view.status.label}</StatusBadge>
-        </div>
-        <Steps view={view} />
-      </div>
-
-      <section aria-labelledby="que-sigue-titulo" className="flex flex-col gap-3 rounded-md border border-border p-4">
-        <h2 id="que-sigue-titulo" className="text-h3">
-          {text.next.title}
-        </h2>
-        <p>{view.next.text}</p>
-        {view.next.taxDataLink && (
-          <p>
-            <TextLink href={ROUTES.portalTaxData}>{text.taxDataLink}</TextLink>
-          </p>
-        )}
-        {view.overdue !== null && <InlineAlert tone="warning">{view.overdue}</InlineAlert>}
-      </section>
-
-      <Section id="resumen" title={text.summaryTitle}>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <StatTile label={text.pool} value={view.summary.pool} />
-          <StatTile label={text.poolBps} value={view.summary.poolBps} />
-          <StatTile label={text.share} value={view.summary.share} />
-        </div>
-        {view.summary.nothingAssigned && <p className="text-text-2">{t(text.nothingAssigned)}</p>}
-      </Section>
-
-      {view.money !== null && (
-        <Section id="desglose" title={text.moneyTitle}>
-          <Amounts lines={view.money} />
-        </Section>
-      )}
-
-      {view.invoice !== null && (
-        <Section id="factura" title={text.invoiceTitle}>
-          {view.invoice.receiverRfc === null ? (
-            <InlineAlert tone="warning">{t(text.receiverMissing)}</InlineAlert>
-          ) : (
-            <p className="break-words">{t(text.receiver, { rfc: view.invoice.receiverRfc })}</p>
+      <PortalMain
+        title={view.title}
+        above={<BackLink href={ROUTES.portalPayouts}>{text.back}</BackLink>}
+        badge={<StatusBadge tone={view.status.tone}>{view.status.label}</StatusBadge>}
+        header={<Steps view={view} />}
+      >
+        <section aria-labelledby="que-sigue-titulo" className="flex max-w-reading flex-col gap-3 surface-raised p-4 sm:p-5">
+          <h2 id="que-sigue-titulo" className="text-h3">
+            {text.next.title}
+          </h2>
+          <p>{view.next.text}</p>
+          {view.next.taxDataLink && (
+            <p>
+              <TextLink href={ROUTES.portalTaxData}>{text.taxDataLink}</TextLink>
+            </p>
           )}
-          <Amounts lines={view.invoice.amounts.map((line) => ({ ...line, total: line.key === "total" }))} />
-          <div className="flex flex-col gap-1">
-            <h3 className="text-h3">{text.latestTitle}</h3>
-            {view.invoice.latest === null ? (
-              <p className="text-text-2">{text.noInvoice}</p>
-            ) : (
-              <>
-                <p className="font-semibold">{view.invoice.latest.status}</p>
-                <p className="text-body-s text-text-2">{view.invoice.latest.submitted}</p>
-                {view.invoice.latest.reviewed !== null && <p className="text-body-s text-text-2">{view.invoice.latest.reviewed}</p>}
-                {view.invoice.latest.reason !== null && <p className="break-words">{view.invoice.latest.reason}</p>}
-              </>
-            )}
-          </div>
-        </Section>
-      )}
+          {view.overdue !== null && <InlineAlert tone="warning">{view.overdue}</InlineAlert>}
+        </section>
 
-      {view.payment !== null && (
-        <Section id="pago" title={text.paymentTitle}>
-          <Amounts
-            lines={[
-              { key: "fecha", label: text.paidOn, amount: view.payment.paidOn },
-              { key: "referencia", label: text.reference, amount: view.payment.reference },
-              { key: "neto", label: text.paidAmount, amount: view.payment.amount, total: true },
+        <Section id="resumen" title={text.summaryTitle}>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <StatTile label={text.pool} value={view.summary.pool} />
+            <StatTile label={text.poolBps} value={view.summary.poolBps} />
+            <StatTile label={text.share} value={view.summary.share} />
+          </div>
+          {view.summary.nothingAssigned && <p className="text-text-2">{t(text.nothingAssigned)}</p>}
+        </Section>
+
+        {view.money !== null && (
+          <Section id="desglose" title={text.moneyTitle}>
+            <Amounts lines={view.money} />
+          </Section>
+        )}
+
+        {view.invoice !== null && (
+          <Section id="factura" title={text.invoiceTitle}>
+            {view.invoice.receiverRfc === null ? (
+              <InlineAlert tone="warning">{t(text.receiverMissing)}</InlineAlert>
+            ) : (
+              <p className="break-words">{t(text.receiver, { rfc: view.invoice.receiverRfc })}</p>
+            )}
+            <Amounts lines={view.invoice.amounts.map((line) => ({ ...line, total: line.key === "total" }))} />
+            <div className="flex flex-col gap-1">
+              <h3 className="text-body-l font-semibold">{text.latestTitle}</h3>
+              {view.invoice.latest === null ? (
+                <p className="text-text-2">{text.noInvoice}</p>
+              ) : (
+                <>
+                  <p className="font-semibold">{view.invoice.latest.status}</p>
+                  <p className="text-body-s text-text-2">{view.invoice.latest.submitted}</p>
+                  {view.invoice.latest.reviewed !== null && <p className="text-body-s text-text-2">{view.invoice.latest.reviewed}</p>}
+                  {view.invoice.latest.reason !== null && <p className="break-words">{view.invoice.latest.reason}</p>}
+                </>
+              )}
+            </div>
+          </Section>
+        )}
+
+        {view.payment !== null && (
+          <Section id="pago" title={text.paymentTitle}>
+            <Amounts
+              lines={[
+                { key: "fecha", label: text.paidOn, amount: view.payment.paidOn },
+                { key: "referencia", label: text.reference, amount: view.payment.reference },
+                { key: "neto", label: text.paidAmount, amount: view.payment.amount, total: true },
+              ]}
+            />
+          </Section>
+        )}
+
+        <Section id="alumnos" title={text.studentsTitle}>
+          <p className="max-w-reading text-text-2">{t(text.aliasNote)}</p>
+          {view.students.length === 0 && <p className="text-text-2">{text.noStudents}</p>}
+          {/* Por alumno, el alias y los puntos: la celda de pesos va vacía. Los pesos, solo en el bote sin consumo y en el total. */}
+          <DataTable
+            caption={text.studentsCaption}
+            captionHidden
+            columns={STUDENT_COLUMNS}
+            rows={[
+              ...view.students.map((student) => ({ key: `alumno-${student.key}`, cells: { student: student.alias, points: student.points, pesos: null } })),
+              { key: "sin-consumo", cells: { student: text.unconsumed, points: null, pesos: view.unconsumed } },
             ]}
+            empty={text.noStudents}
+            totals={{ student: text.total, points: view.totalPoints, pesos: view.total }}
           />
         </Section>
-      )}
 
-      <Section id="alumnos" title={text.studentsTitle}>
-        <p className="max-w-reading text-text-2">{t(text.aliasNote)}</p>
-        {view.students.length === 0 && <p className="text-text-2">{text.noStudents}</p>}
-        {/* Por alumno, el alias y los puntos: la celda de pesos va vacía. Los pesos, solo en el bote sin consumo y en el total. */}
-        <DataTable
-          caption={text.studentsCaption}
-          captionHidden
-          columns={STUDENT_COLUMNS}
-          rows={[
-            ...view.students.map((student) => ({ key: `alumno-${student.key}`, cells: { student: student.alias, points: student.points, pesos: null } })),
-            { key: "sin-consumo", cells: { student: text.unconsumed, points: null, pesos: view.unconsumed } },
-          ]}
-          empty={text.noStudents}
-          totals={{ student: text.total, points: view.totalPoints, pesos: view.total }}
-        />
-      </Section>
-
-      {view.downloadable && (
-        <section id={DOWNLOAD_BLOCK_ID} aria-labelledby="descargas-titulo" className="flex flex-col gap-3">
-          <h2 id="descargas-titulo" className="text-h2">
-            {text.downloadTitle}
-          </h2>
-          <CsvDownload period={view.period} page={page} />
-        </section>
-      )}
+        {view.downloadable && (
+          <section id={DOWNLOAD_BLOCK_ID} aria-labelledby="descargas-titulo" className="flex flex-col gap-3">
+            <h2 id="descargas-titulo" className="text-h3">
+              {text.downloadTitle}
+            </h2>
+            <CsvDownload period={view.period} page={page} />
+          </section>
+        )}
+      </PortalMain>
     </PortalFrame>
   );
 }

@@ -10,8 +10,8 @@ import { t } from "@/messages/format";
 import { ROUTES } from "@/services/account/navigation";
 import { Button } from "@/ui/button";
 import { SPACE } from "@/ui/cx";
+import { FlowerState } from "@/ui/flower-state";
 import { InlineAlert } from "@/ui/inline-alert";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { Textarea } from "@/ui/textarea";
 import { TextLink } from "@/ui/text-link";
 
@@ -19,6 +19,7 @@ import type { PlayerProps } from "@/app/_video/player";
 
 import { BlockResult, useAnswerFocus } from "../_lib/answer";
 import { CodeBlock } from "../_lib/code-block";
+import { AdminMain } from "../_lib/shell";
 import { approveAction, lessonVideoAction, returnAction, reviewCodeAction, reviewResourceAction, reviewVideoAction } from "./actions";
 import { RETURN_FIX_FIELD, RETURN_MAX, RETURN_REASON_FIELD, returnButton, reviewButton, type CodeState, type ReturnFailure, type ReturnProblem, type ReturnState, type ReviewFailure, type ReviewState, type VideoAnswer } from "./outcomes";
 import type { CourseRow, LessonRow, ReviewView, SubmissionRow } from "./rows";
@@ -235,11 +236,7 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
     video.kind === "loading" ? text.loading : video.kind === "no_video" ? text.noVideo : video.kind === "failed" ? text.failed : null;
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-10 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-h1">{text.title}</h1>
-        <p className="text-text-2">{text.intro}</p>
-      </div>
+    <AdminMain area="content" title={text.title} lead={<p>{text.intro}</p>} measure="reading">
       {!view.canChange && (
         <CodeBlock
           blockId={CODE_BLOCK_ID}
@@ -293,7 +290,7 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
       </p>
 
       <section ref={block} id={QUEUE_BLOCK_ID} aria-labelledby={QUEUE_HEADING_ID} tabIndex={-1} className="flex flex-col gap-6 outline-none">
-        <h2 id={QUEUE_HEADING_ID} className="text-h2">
+        <h2 id={QUEUE_HEADING_ID} className="text-h3">
           {text.queueTitle}
         </h2>
         {/* Lo pinta el servidor y se va al montar: sin JavaScript se queda. No es un
@@ -326,11 +323,12 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
         {/* El foco de «Cerrar este aviso», cuando el curso ya no está. Con el curso en la cola, lo toma su bloque. */}
         <section ref={returnRow === undefined ? returnBlock : undefined} tabIndex={-1} className="flex flex-col gap-6 outline-none">
         {view.teachers.length === 0 ? (
-          <p className="text-text-2">{text.empty}</p>
+          <FlowerState title={text.empty} className="surface-raised" />
         ) : (
           view.teachers.map((teacher) => (
             <div key={teacher.name} className="flex flex-col gap-4">
-              <h3 className="text-h3 break-words">{teacher.name}</h3>
+              {/* El maestro agrupa sus cursos: va de antetítulo, y el título de cada curso es lo que pesa. */}
+              <h3 className="eyebrow break-words text-accent-muted">{teacher.name}</h3>
               <ol className="flex flex-col gap-6">
                 {teacher.courses.map((course) => (
                   <Course
@@ -369,7 +367,7 @@ export function ReviewScreen({ view, published = false, returned = false }: Revi
       <p className="text-body-s">
         <TextLink href={ROUTES.admin}>{text.backToAdmin}</TextLink>
       </p>
-    </main>
+    </AdminMain>
   );
 }
 
@@ -407,7 +405,7 @@ function Course({ course, canChange, confirming, answer, action, pending, mounte
   const headingId = `revision-curso-${course.id}`;
   return (
     <li>
-      <article aria-labelledby={headingId} className="flex flex-col gap-4 rounded-md border border-border p-4">
+      <article aria-labelledby={headingId} className="flex flex-col gap-4 surface-raised p-4 sm:p-5">
         <div className="flex flex-col gap-1">
           <h4 id={headingId} className="text-body-l font-semibold break-words">
             {course.title}

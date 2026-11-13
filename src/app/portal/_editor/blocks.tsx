@@ -187,7 +187,7 @@ export function CourseBlock({ view }: { view: EditorView }) {
 
   return (
     <section id={DATA_ID} ref={block} tabIndex={-1} aria-labelledby="editor-datos-titulo" className="flex flex-col gap-6 outline-none">
-      <h2 id="editor-datos-titulo" className="text-h2">
+      <h2 id="editor-datos-titulo" className="text-h3">
         {text.courseData}
       </h2>
       {view.editable ? (
@@ -291,14 +291,14 @@ export function CourseBlock({ view }: { view: EditorView }) {
   );
 }
 
-/** Un grupo de campos del bloque de la derecha: su fondo y su borde lo separan del fondo de la pantalla. */
-const CARD = "flex flex-col gap-6 rounded-md border border-border bg-surface-1 p-4 sm:p-6";
+/** Un grupo de campos del bloque de la derecha: una superficie elevada, como las fichas del armazón (T-616, solicitud 5). */
+const CARD = "flex flex-col gap-6 surface-raised p-4 sm:p-5";
 
 /** El título y la nota de un grupo: el grupo se nombra con `id` y se describe con `${id}-nota`. */
 function GroupHeading({ id, title, hint }: { id: string; title: string; hint: string }) {
   return (
     <div className="flex flex-col gap-1">
-      <h3 id={id} className="text-h3">
+      <h3 id={id} className="text-body-l font-semibold">
         {title}
       </h3>
       <p id={`${id}-nota`} className="text-body-s text-text-3">
@@ -527,18 +527,18 @@ function ModuleItem({ module, view, state, responses, action, onInput, pending, 
   return (
     <li
       {...dropZone(kit, { kind: "module", id: module.id }, ["module", "lesson"])}
-      className={cx("flex flex-col rounded-md border bg-surface-1", module.current ? "border-accent" : "border-border")}
+      className={cx("flex flex-col surface-raised", module.current && "outline-1 -outline-offset-1 outline-accent")}
     >
-      <div className={cx("flex flex-wrap items-center justify-between gap-2 rounded-t-md border-b p-3", module.current ? "border-accent bg-accent-subtle" : "border-border bg-surface-2")}>
+      <div className={cx("flex flex-wrap items-center justify-between gap-2 rounded-t-lg border-b p-3", module.current ? "border-accent bg-accent-subtle" : "border-border bg-surface-2")}>
         <span className="flex min-w-0 items-center gap-2">
           {view.editable && <DragHandle item={{ kind: "module", id: module.id, title: module.title, list: view.course, position, total }} kit={kit} />}
           {/* El número va arriba, a la vista; el enlace lo lleva en su nombre («Módulo 1: Inicio») con un texto que solo
               oye el lector, para que su nombre contenga lo que se ve (WCAG 2.5.3). */}
           <span className="flex min-w-0 flex-col">
-            <span aria-hidden="true" className="text-label text-text-3 uppercase">
+            <span aria-hidden="true" className="eyebrow text-accent-muted">
               {module.label}
             </span>
-            <Link href={module.href} aria-current={module.current ? "true" : undefined} className="min-h-touch content-center text-h3 break-words text-text hover:underline">
+            <Link href={module.href} aria-current={module.current ? "true" : undefined} className="min-h-touch content-center text-body-l font-semibold break-words text-text hover:underline">
               <span className="sr-only">{t(text.moduleLabel, { label: module.label })}</span> {module.title}
             </Link>
           </span>
@@ -706,7 +706,7 @@ export function StructureBlock({ view }: { view: EditorView }) {
 
   return (
     <section id={STRUCTURE_ID} ref={block} tabIndex={-1} aria-labelledby="editor-estructura-titulo" className="flex flex-col gap-4 outline-none">
-      <h2 id="editor-estructura-titulo" className="text-h2">
+      <h2 id="editor-estructura-titulo" className="text-h3">
         {text.structure}
       </h2>
       <Link
@@ -783,7 +783,7 @@ export function StructureBlock({ view }: { view: EditorView }) {
             readOnly={pending}
           />
           <div>
-            <Button type="submit" name="do" value={view.structure.addModule}>
+            <Button type="submit" name="do" value={view.structure.addModule} variant="secondary">
               {text.addModule}
             </Button>
           </div>
@@ -833,8 +833,8 @@ export function ItemBlock({ view, selected }: { view: EditorView; selected: Excl
   return (
     <section id={blockId} ref={block} tabIndex={-1} aria-labelledby="editor-elegido-encabezado" className="flex flex-col gap-6 outline-none">
       <div className="flex flex-col gap-1">
-        <p className="text-label text-text-3 uppercase">{selected.place}</p>
-        <h2 id="editor-elegido-encabezado" className="text-h2 break-words">
+        <p className="eyebrow text-accent-muted">{selected.place}</p>
+        <h2 id="editor-elegido-encabezado" className="text-h3 break-words">
           {selected.title}
         </h2>
       </div>

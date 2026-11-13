@@ -320,9 +320,9 @@ export function ResourcesBlock({ course, lesson, items, editable, self, limits }
       ref={block}
       tabIndex={-1}
       aria-labelledby="editor-recursos-titulo"
-      className="flex flex-col gap-4 rounded-md border border-border bg-surface-1 p-4 outline-none sm:p-6"
+      className="flex flex-col gap-4 surface-raised p-4 outline-none sm:p-5"
     >
-      <h3 id="editor-recursos-titulo" className="text-h3">
+      <h3 id="editor-recursos-titulo" className="text-body-l font-semibold">
         {lesson === null ? text.courseTitle : text.lessonTitle}
       </h3>
       <BlockResult message={message} tone={state.kind === "failed" || state.kind === "download_throttled" ? "danger" : "success"} pending={pending} pendingText={portal.editor.working} answer={answer} spoken={spoken} />

@@ -4,10 +4,10 @@ import { useActionState } from "react";
 
 import { admin } from "@/messages/es/admin";
 import { ROUTES } from "@/services/account/navigation";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
 
 import { CodeBlock } from "../_lib/code-block";
+import { AdminMain } from "../_lib/shell";
 import { catalogCodeAction, levelsAction, practicesAction } from "./actions";
 import { ListBlock, type ListBlockIds } from "./list-block";
 import type { CatalogState, CodeState } from "./outcomes";
@@ -63,11 +63,7 @@ export function CatalogScreen({ view }: CatalogScreenProps) {
   const [levels, sendLevels, levelsPending] = useActionState(levelsAction, LIST_IDLE, LEVELS_PERMALINK);
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-10 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-h1">{text.title}</h1>
-        <p className="text-text-2">{text.intro}</p>
-      </div>
+    <AdminMain area="content" title={text.title} lead={<p>{text.intro}</p>} measure="reading">
       {!view.canChange && (
         <CodeBlock
           blockId={CODE_BLOCK_ID}
@@ -93,6 +89,6 @@ export function CatalogScreen({ view }: CatalogScreenProps) {
       <p className="text-body-s">
         <TextLink href={ROUTES.admin}>{text.backToAdmin}</TextLink>
       </p>
-    </main>
+    </AdminMain>
   );
 }
