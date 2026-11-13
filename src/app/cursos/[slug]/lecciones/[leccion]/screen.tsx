@@ -734,7 +734,7 @@ export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, 
           {/* La cabecera (T-616, 3b-2): el módulo como antetítulo en oro apagado, sobre el fondo liso, y el título más grande.
               Va después del reproductor: lo que cambie aquí no lo vuelve a montar. */}
           <div className="flex flex-col gap-1">
-            {moduleTitle !== null && <p className="eyebrow text-accent-muted">{moduleTitle}</p>}
+            {moduleTitle !== null && <p className="eyebrow text-accent-muted wrap-anywhere">{moduleTitle}</p>}
             <h1 className="text-h1 wrap-anywhere">{heading}</h1>
             <p className="text-body-s text-text-2">
               <TextLink href={course.href}>{course.title}</TextLink>

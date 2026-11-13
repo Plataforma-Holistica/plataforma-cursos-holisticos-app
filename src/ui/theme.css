@@ -645,9 +645,10 @@
     color: var(--on-accent);
   }
   /* Lo visto, en oro, contra lo cargado (blanco opaco en Mux: daba 1.55) y contra la pista: los dos translúcidos, para que
-     el avance se distinga de los dos (3:1 sobre el negro del reproductor; `contrast.test.ts`). */
+     el avance se distinga de los dos (3:1 sobre el negro del reproductor; `contrast.test.ts`). Lo cargado va dentro de la
+     pista, así que se ven las dos capas juntas. */
   &::part(time range) {
-    --media-time-range-buffered-color: rgb(255 255 255 / 0.4);
+    --media-time-range-buffered-color: rgb(255 255 255 / 0.25);
     --media-range-track-background: rgb(255 255 255 / 0.2);
   }
   /* Los menús, oscuros: en Mux son blancos, y el oro de la palomita y del contorno daba 1.55 sobre el blanco. */
