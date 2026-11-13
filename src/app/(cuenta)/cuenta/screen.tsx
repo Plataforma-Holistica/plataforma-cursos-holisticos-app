@@ -8,6 +8,7 @@ import { ROUTES } from "@/services/account/navigation";
 import { Button } from "@/ui/button";
 import { type FormError, FormErrorSummary } from "@/ui/form-error-summary";
 import { InlineAlert } from "@/ui/inline-alert";
+import { PageHeader } from "@/ui/page-header";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
 
@@ -38,6 +39,10 @@ import { SESSIONS_BLOCK_ID, SessionsBlock } from "./sessions-block";
 //
 // Los estados de todos los bloques viven aquí arriba, y no en cada bloque: cualquiera de
 // ellos puede contestar que la cuenta está suspendida, y eso sustituye a la pantalla entera.
+//
+// T-616, 3b-3: arriba, la cabecera del rediseño sin foto (la filigrana y el resplandor), con el título y una entradilla y
+// sin antetítulo («Cuenta» no cuelga de nada; decisión mía sin confirmar). Los bloques van debajo, en la columna del
+// formulario, a la izquierda bajo el título y no al centro de la página.
 
 const text = account.manage;
 // Un `id` que ninguna otra pantalla usa: si la acción redirige, el navegador sin JavaScript
@@ -106,67 +111,72 @@ export function AccountScreen({ name, email, sessions, secondFactor = false }: A
   const round = sent + local.checks;
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-10 px-4 pt-16 pb-24 outline-none sm:pb-16">
-      <h1 className="text-h1">{text.title}</h1>
-      <section id={NAME_BLOCK_ID} aria-labelledby={NAME_TITLE_ID} className="flex flex-col gap-4">
-        <h2 id={NAME_TITLE_ID} className="text-h3">
-          {text.nameTitle}
-        </h2>
-        <form
-          action={action}
-          onSubmit={checkBeforeSending}
-          onInput={() => setEditedAfter(sent)}
-          noValidate
-          className="flex flex-col gap-6"
-        >
-          <FormErrorSummary errors={errors} attempt={round} />
-          {/* Cuando llega la respuesta de un envío, el campo se arma de nuevo con lo que quedó. */}
-          <NameField
-            key={`campo-${sent}`}
-            id={NAME_ID}
-            defaultValue={state.kind === "idle" ? name : state.name}
-            problem={problem}
-            round={round}
-            readOnly={pending}
-          />
-          {/* Cada hermano lleva su propia `key`: con la misma, el aviso de un intento se
-              quedaría en pantalla con el siguiente. */}
-          {answered && state.kind === "saved" && (
-            <InlineAlert key={`guardado-${sent}`} tone="success" live>
-              {text.saved}
-            </InlineAlert>
-          )}
-          {answered && state.kind === "unavailable" && (
-            <InlineAlert key={`fallo-${sent}`} tone="danger" live>
-              {account.common.unavailable}
-            </InlineAlert>
-          )}
-          <Button type="submit" loading={pending} loadingLabel={text.saving}>
-            {text.save}
-          </Button>
-        </form>
-      </section>
-      <section aria-labelledby={EMAIL_TITLE_ID} className="flex flex-col gap-2">
-        <h2 id={EMAIL_TITLE_ID} className="text-h3">
-          {text.emailTitle}
-        </h2>
-        {email !== null && <p>{email}</p>}
-        <p className="text-body-s text-text-2">{text.emailNote}</p>
-      </section>
-      <PasswordBlock recoverOnly={secondFactor} state={password} action={passwordAction} pending={passwordPending} />
-      <SessionsBlock sessions={sessions} state={closing} action={closeAction} pending={closingPending} />
-      {/* «Mis comentarios» (PA-24; T-501): un enlace fijo, sin leer nada (decisión de Sergio del 2026-11-08). */}
-      <section aria-labelledby={COMMENTS_TITLE_ID} className="flex flex-col gap-2">
-        <h2 id={COMMENTS_TITLE_ID} className="text-h3">
-          {commentText.mine.accountTitle}
-        </h2>
-        <p>
-          <TextLink href={ROUTES.myComments}>{commentText.mine.accountLink}</TextLink>
-        </p>
-      </section>
-      <p className="text-body-s">
-        <TextLink href={ROUTES.home}>{text.backHome}</TextLink>
-      </p>
+    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col pb-24 outline-none sm:pb-16">
+      <PageHeader title={text.title} lead={text.lead} />
+      <div className="px-4 sm:px-8">
+        <div className="flex max-w-form flex-col gap-10">
+          <section id={NAME_BLOCK_ID} aria-labelledby={NAME_TITLE_ID} className="flex flex-col gap-4">
+            <h2 id={NAME_TITLE_ID} className="text-h3">
+              {text.nameTitle}
+            </h2>
+            <form
+              action={action}
+              onSubmit={checkBeforeSending}
+              onInput={() => setEditedAfter(sent)}
+              noValidate
+              className="flex flex-col gap-6"
+            >
+              <FormErrorSummary errors={errors} attempt={round} />
+              {/* Cuando llega la respuesta de un envío, el campo se arma de nuevo con lo que quedó. */}
+              <NameField
+                key={`campo-${sent}`}
+                id={NAME_ID}
+                defaultValue={state.kind === "idle" ? name : state.name}
+                problem={problem}
+                round={round}
+                readOnly={pending}
+              />
+              {/* Cada hermano lleva su propia `key`: con la misma, el aviso de un intento se
+                  quedaría en pantalla con el siguiente. */}
+              {answered && state.kind === "saved" && (
+                <InlineAlert key={`guardado-${sent}`} tone="success" live>
+                  {text.saved}
+                </InlineAlert>
+              )}
+              {answered && state.kind === "unavailable" && (
+                <InlineAlert key={`fallo-${sent}`} tone="danger" live>
+                  {account.common.unavailable}
+                </InlineAlert>
+              )}
+              <Button type="submit" loading={pending} loadingLabel={text.saving}>
+                {text.save}
+              </Button>
+            </form>
+          </section>
+          <section aria-labelledby={EMAIL_TITLE_ID} className="flex flex-col gap-2">
+            <h2 id={EMAIL_TITLE_ID} className="text-h3">
+              {text.emailTitle}
+            </h2>
+            {/* Sin espacios, un correo largo ensanchaba la página a 320 px: se parte donde haga falta (T-616, 3b-3). */}
+            {email !== null && <p className="wrap-anywhere">{email}</p>}
+            <p className="text-body-s text-text-2">{text.emailNote}</p>
+          </section>
+          <PasswordBlock recoverOnly={secondFactor} state={password} action={passwordAction} pending={passwordPending} />
+          <SessionsBlock sessions={sessions} state={closing} action={closeAction} pending={closingPending} />
+          {/* «Mis comentarios» (PA-24; T-501): un enlace fijo, sin leer nada (decisión de Sergio del 2026-11-08). */}
+          <section aria-labelledby={COMMENTS_TITLE_ID} className="flex flex-col gap-2">
+            <h2 id={COMMENTS_TITLE_ID} className="text-h3">
+              {commentText.mine.accountTitle}
+            </h2>
+            <p>
+              <TextLink href={ROUTES.myComments}>{commentText.mine.accountLink}</TextLink>
+            </p>
+          </section>
+          <p className="text-body-s">
+            <TextLink href={ROUTES.home}>{text.backHome}</TextLink>
+          </p>
+        </div>
+      </div>
     </main>
   );
 }

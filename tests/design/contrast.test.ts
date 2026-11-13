@@ -167,6 +167,22 @@ describe("contraste de los tokens (diseño, secciones 3.3 y 3.4)", () => {
     expect(value, "actualiza la tabla del diseño").toBe(9.78);
   });
 
+  // T-616, 3b-3: en una cabecera sin foto (la cuenta, «Mis comentarios»), la entradilla va en `text-2` sobre la filigrana con
+  // su resplandor. La filigrana es un trazo de un píxel en el tono del borde: el fondo que cuenta es el resplandor. La misma
+  // medida cubre a «Volver a Cuenta» (`BackLink`, también en `text-2`, dentro de la cabecera). Se lee de los dos componentes
+  // que siguen en `text-2`, como las pruebas del velo leen sus clases.
+  it("la entradilla en text-2 sobre el centro del resplandor de una cabecera sin foto", () => {
+    const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+    expect(source("../../src/ui/page-header.tsx")).toMatch(/lead !== undefined && <div className="[^"]*text-text-2[^"]*">/);
+    expect(source("../../src/ui/back-link.tsx")).toMatch(/className="[^"]*text-text-2[^"]*"/);
+    const glow = css.match(/--glow:\s*rgb\((\d+) (\d+) (\d+) \/ ([\d.]+)\)\s*;/);
+    if (glow === null) throw new Error("La hoja de tokens no define --glow como rgb con opacidad.");
+    const [, r, g, b, alpha] = glow.map(Number) as [number, number, number, number, number];
+    const value = ratio(rgbOf("text-2"), mix([r, g, b], alpha, rgbOf("bg")));
+    expect(value).toBeGreaterThanOrEqual(AA_TEXT);
+    expect(value, "actualiza la tabla del diseño").toBe(8.74);
+  });
+
   // T-616, 3b-1 (decisión del carril A del 2026-11-12, y su revisión): en una cabecera con foto (`PageHeader`), todo su texto
   // (la entradilla en `text-2` y el antetítulo en el oro pleno) pasa 4.5 sobre el peor caso: un píxel blanco bajo el velo del
   // fondo, con el resplandor (`--glow-header`) encima, que aclara. El velo se lee de `page-header.tsx`: en la normal, lo más
