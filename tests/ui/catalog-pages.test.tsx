@@ -3,8 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { terms } from "@/messages/es/terms";
 import { MOTIFS, motifFor } from "@/ui/motifs";
+import { PRACTICE_PHOTOS, teacherPhoto } from "@/ui/photos/choice";
+import { TeacherCard } from "@/ui/teacher-card";
 
 import { a11yViolations } from "../setup/a11y";
+
+/** El nombre de una foto importada, sin su extensión: en las pruebas la importación da su dirección; en Next, un objeto con `src`. */
+const fileOf = (photo: unknown) =>
+  (String(typeof photo === "string" ? photo : (photo as { src?: string } | null)?.src ?? "").split("/").pop() ?? "").split(".")[0] ?? "";
 
 // Las fichas públicas del catálogo (PA-02, PA-03; T-210), con la guarda y los servicios
 // simulados: qué pinta cada una según quién mira y lo que contesta el servicio. Qué botón le
@@ -357,6 +363,29 @@ describe("la ficha de un maestro (PA-03)", () => {
     const again = render(await TeacherRoute(params("ana-robles")));
     expect(again.container.querySelector("main header img")).toBeNull();
     expect(within(again.container.querySelector("main header") as HTMLElement).getByText("A")).toBeInTheDocument();
+  });
+
+  // T-616, 3b-1 (y su revisión): la foto de la ficha es la del maestro, por su slug, la misma de su tarjeta, y no la de su
+  // práctica. El slug se elige para que las dos reglas den fotos distintas: con la de antes (la posición de la práctica), la
+  // prueba falla.
+  it("sin retrato, la foto es la del maestro, la misma de su tarjeta, y no la de su práctica", async () => {
+    const POSITION = 1;
+    const byPractice = PRACTICE_PHOTOS[POSITION % PRACTICE_PHOTOS.length];
+    const slug = Array.from({ length: 20 }, (_, index) => `maestra-${index}`).find((candidate) => teacherPhoto(candidate) !== byPractice);
+    if (slug === undefined) throw new Error("Ningún slug de prueba da otra foto que la de su práctica.");
+    mocks.teacherPage.mockResolvedValue({
+      kind: "found",
+      teacher: { slug, name: "Ana Robles", bio: null, practices: ["Meditación"], tone: 3, practicePosition: POSITION, courseCount: 1 },
+      courses: [COURSE],
+    });
+    const { container } = render(await TeacherRoute(params(slug)));
+    const src = container.querySelector("main header img")?.getAttribute("src") ?? "";
+    expect(fileOf(teacherPhoto(slug))).toMatch(/^practica-/);
+    expect(src).toContain(fileOf(teacherPhoto(slug)));
+    expect(src).not.toContain(fileOf(byPractice));
+    const card = render(<TeacherCard slug={slug} href={`/maestros/${slug}`} name="Ana Robles" practices={["Meditación"]} tone={3} practicePosition={POSITION} />);
+    expect(card.container.querySelector("img")?.getAttribute("src")).toContain(fileOf(teacherPhoto(slug)));
+    card.unmount();
   });
 
   // T-616, solicitud 3: la cabecera con el resplandor y la filigrana, sus prácticas de antetítulo, y sus cursos en la rejilla

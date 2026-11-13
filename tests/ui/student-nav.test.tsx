@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -8,6 +8,7 @@ import { NO_NAV_ACCESS, type NavAccess } from "@/services/account/nav-access";
 
 vi.mock("@/app/(cuenta)/_lib/session-actions", () => ({ signOutAction: vi.fn() }));
 
+import { takeArrival } from "@/app/_catalog/my-list-link";
 import { StudentNav } from "@/app/_catalog/nav";
 
 // La barra única del alumno (T-616, solicitud 2; pedidos de Sergio del 2026-11-10 y 11): fija arriba, con
@@ -137,6 +138,50 @@ describe("la barra del alumno", () => {
     await user.click(within(principal()).getByRole("link", { name: "Mi lista" }));
     expect(arrivals).toHaveBeenCalledTimes(1);
     window.removeEventListener("mi-lista:llegada", arrivals);
+  });
+
+  // T-616, 3b-1: con una tecla de modificación o con otro botón, el enlace abre en otra pestaña o ventana, o no navega: el
+  // bloque de esta pestaña no debe darse por llegado, ni quedar la marca para el próximo inicio que se monte.
+  it.each([
+    ["Ctrl", { ctrlKey: true }],
+    ["Cmd", { metaKey: true }],
+    ["Shift", { shiftKey: true }],
+    ["Alt", { altKey: true }],
+    ["el botón de en medio", { button: 1 }],
+  ] as const)("con %s, «Mi lista» no avisa la llegada ni deja la marca", (_, modifiers) => {
+    // Lo que haya dejado otra prueba de este archivo.
+    takeArrival();
+    const arrivals = vi.fn();
+    window.addEventListener("mi-lista:llegada", arrivals);
+    bar();
+    const link = within(principal()).getByRole("link", { name: "Mi lista" });
+    // Que el DOM simulado no intente seguir el enlace: en el documento, después de los manejadores de React.
+    document.addEventListener("click", (event) => event.preventDefault(), { once: true });
+    fireEvent.click(link, modifiers);
+    expect(arrivals).not.toHaveBeenCalled();
+    expect(takeArrival()).toBe(false);
+    window.removeEventListener("mi-lista:llegada", arrivals);
+  });
+
+  it("un clic simple avisa la llegada y deja la marca, que se usa una sola vez", async () => {
+    takeArrival();
+    const user = userEvent.setup();
+    bar();
+    await user.click(within(principal()).getByRole("link", { name: "Mi lista" }));
+    expect(takeArrival()).toBe(true);
+    expect(takeArrival()).toBe(false);
+  });
+
+  // T-616, 3b-1: los accesos por rol y el menú de la persona iban en un `<div>` sin región, fuera de la navegación.
+  it("los accesos por rol y el menú de la persona van en su propia navegación, con nombre, y la principal no cambia", () => {
+    bar(BOTH, "/inicio");
+    const account = screen.getByRole("navigation", { name: "Tu cuenta y accesos" });
+    expect(account).toContainElement(menu());
+    expect(account.querySelector("[data-role-access]")).not.toBeNull();
+    // En el teléfono, los accesos de la barra siguen escondidos: van en el menú.
+    expect(account.querySelector("[data-role-access]")).toHaveClass("hidden", "sm:flex");
+    expect(principal()).not.toContainElement(menu());
+    expect(within(principal()).getAllByRole("link").map((link) => link.textContent)).toEqual(["Inicio", "Explorar", "Mi lista", "Cuenta"]);
   });
 
   it("los resúmenes no llevan el triángulo, tampoco en WebKit", () => {

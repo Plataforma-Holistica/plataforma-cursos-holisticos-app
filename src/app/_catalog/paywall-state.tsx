@@ -13,8 +13,10 @@ import { paywallAction, paywallCopy, type Denial } from "./paywall";
 export function PaywallState({ denial, back }: { denial: Denial; back: string | null }) {
   const [title, sentence] = paywallCopy(denial);
   return (
+    // El título es un `h2`, como el del `Paywall` que reemplaza en la lección (lo buscan sus pruebas).
     <FlowerState
       size="compact"
+      titleLevel={2}
       title={title}
       className="h-full justify-center"
       action={
