@@ -64,9 +64,10 @@ export function plansAnswerOf(answer: Exclude<StartAnswer, { kind: "redirect" } 
   }
 }
 
-/** El precio el mes del plan anual, redondeado hacia abajo al centavo: «equivale a». */
+/** El precio al mes del plan anual, «equivale a», redondeado hacia arriba al centavo: nunca se anuncia menos de lo que cuesta
+ * (decisión de Sergio del 2026-11-12; antes era hacia abajo). */
 export function monthlyEquivalent(annualCents: number): number {
-  return Math.floor(annualCents / 12);
+  return Math.ceil(annualCents / 12);
 }
 
 const MONEY = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
