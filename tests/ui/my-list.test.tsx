@@ -2,6 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { MyListLink } from "@/app/_catalog/my-list-link";
 import { MY_LIST_ARRIVAL } from "@/app/_catalog/my-list/arrival";
 import { MyListBlock, type ListCourse } from "@/app/_catalog/my-list/my-list-block";
 import type { ListState } from "@/app/_catalog/my-list/outcomes";
@@ -208,11 +209,42 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
     expect(screen.queryByText(/Todavía no guardas ningún curso/)).toBeNull();
   });
 
-  it("al llegar por su ancla toma el foco, también si ya se estaba en el inicio", async () => {
+  /** Lo que haría el navegador en dos cuadros: el foco del bloque espera uno. */
+  const frames = () => act(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+
+  // Cambió por el requisito (T-616, 3b-1): antes, montarse con el ancla en la dirección bastaba para tomar el foco, también al
+  // recargar, sin que nadie llegara por la barra. Ahora solo toma el foco al llegar por la barra (la marca de un solo uso que
+  // deja «Mi lista»), o si alguien escribe el ancla a mano (`hashchange`).
+  it("al recargar con el ancla, sin haber llegado por la barra, no toma el foco", async () => {
     window.history.replaceState(null, "", "/inicio#bloque-lista");
     const { container } = render(page(vi.fn(), [A]));
+    await frames();
+    expect(container.querySelector("#bloque-lista")).not.toHaveFocus();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("al llegar por la barra desde otra pantalla toma el foco al montarse, una sola vez", async () => {
+    const user = userEvent.setup();
+    // La barra en otra pantalla: se pulsa «Mi lista» y la pantalla se va antes de que el bloque exista.
+    const other = render(
+      <MyListLink href="/inicio#bloque-lista" className="">
+        Mi lista
+      </MyListLink>,
+    );
+    await user.click(screen.getByRole("link", { name: "Mi lista" }));
+    other.unmount();
+    const first = render(page(vi.fn(), [A]));
+    await waitFor(() => expect(first.container.querySelector("#bloque-lista")).toHaveFocus(), { timeout: 3_000 });
+    first.unmount();
+    // La marca ya se usó: el siguiente montaje no toma el foco.
+    const again = render(page(vi.fn(), [A]));
+    await frames();
+    expect(again.container.querySelector("#bloque-lista")).not.toHaveFocus();
+  });
+
+  it("si se escribe el ancla a mano en el inicio, toma el foco; si se quita, no", async () => {
+    const { container } = render(page(vi.fn(), [A]));
     const block = container.querySelector<HTMLElement>("#bloque-lista");
-    await waitFor(() => expect(block).toHaveFocus(), { timeout: 3_000 });
     screen.getByRole("button", { name: "Otra cosa" }).focus();
     window.history.replaceState(null, "", "/inicio");
     window.dispatchEvent(new HashChangeEvent("hashchange"));

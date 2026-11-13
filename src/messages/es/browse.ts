@@ -15,6 +15,8 @@ export const browse = defineMessages({
     // Los accesos por rol (T-616): solo a quien es maestro o del equipo.
     portal: "Mi portal",
     admin: "Administración",
+    // La navegación de la derecha: los accesos por rol y el menú de la persona (T-616, 3b-1). Otro nombre que «Principal».
+    accountLabel: "Tu cuenta y accesos",
     // El menú de la persona.
     menu: "Tu cuenta",
     myComments: "Mis comentarios",

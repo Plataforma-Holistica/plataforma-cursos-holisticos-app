@@ -12,6 +12,8 @@ import { FlowerState } from "@/ui/flower-state";
 import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 
+import { takeArrival } from "../my-list-link";
+
 import { MY_LIST_ARRIVAL } from "./arrival";
 import type { ListState } from "./outcomes";
 
@@ -28,7 +30,9 @@ import type { ListState } from "./outcomes";
 //
 // «Mi lista» de la barra del alumno lleva a este bloque por su ancla (T-616): al llegar toma el foco, y si no
 // hay nada guardado lo dice, solo entonces: el inicio sin nada guardado sigue sin «Mi lista». La llegada la avisa
-// el enlace (`MY_LIST_ARRIVAL`), o la trae la dirección al montarse; sin JavaScript, la nota sale por `:target`.
+// el enlace (`MY_LIST_ARRIVAL`) si el bloque ya está pintado, o la deja en una marca de un solo uso que el bloque consume
+// al montarse (`takeArrival`, 3b-1: montarse con el ancla en la dirección ya no basta, porque así tomaba el foco también
+// al recargar); y `hashchange`, para quien escribe el ancla a mano. Sin JavaScript, la nota sale por `:target`.
 //
 // Desde T-616 (solicitud 3), la nota es un estado con la flor (`FlowerState`), y el aire de arriba lo pone quien lo usa en lo
 // que se ve (`offset`): el bloque está siempre, también vacío, y no debe sumar aire si no muestra nada. La práctica de cada
@@ -120,21 +124,26 @@ export function MyListBlock({ action, courses, permalink, id, offset }: MyListBl
   // Si se llegó por «Mi lista» de la barra: se dice que no hay nada guardado.
   const [arrived, setArrived] = useState(false);
 
-  // Al llegar por el ancla, desde otra pantalla (la dirección la trae al montarse) o desde el mismo inicio (lo avisa el
-  // enlace, antes de que el enrutador desplace: el foco espera un cuadro y no desplaza).
+  // Al llegar por la barra: desde otra pantalla (la marca la consume el bloque al montarse) o desde el mismo inicio (lo
+  // avisa el enlace, antes de que el enrutador desplace: el foco espera un cuadro y no desplaza; el aviso usa también la
+  // marca, para que no quede viva para otro montaje). Y si alguien escribe el ancla a mano (`hashchange`).
   useEffect(() => {
     const focus = () => {
       setArrived(true);
       requestAnimationFrame(() => block.current?.focus({ preventScroll: true }));
     };
+    const fromBar = () => {
+      takeArrival();
+      focus();
+    };
     const fromAddress = () => {
       if (window.location.hash === `#${id}`) focus();
     };
-    fromAddress();
-    window.addEventListener(MY_LIST_ARRIVAL, focus);
+    if (takeArrival()) focus();
+    window.addEventListener(MY_LIST_ARRIVAL, fromBar);
     window.addEventListener("hashchange", fromAddress);
     return () => {
-      window.removeEventListener(MY_LIST_ARRIVAL, focus);
+      window.removeEventListener(MY_LIST_ARRIVAL, fromBar);
       window.removeEventListener("hashchange", fromAddress);
     };
   }, [id]);
