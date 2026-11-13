@@ -14,7 +14,8 @@ const BACK = "/cursos/respirar/lecciones/b0000000-0000-4000-8000-000000000002";
 describe("PaywallState (PA-33)", () => {
   it("quien nunca se suscribió: el título, la frase y «Ver planes» con la lección como destino", async () => {
     const { container } = render(<PaywallState denial={{ reason: "never_subscribed" }} back={BACK} />);
-    expect(screen.getByText("Esta lección pide una suscripción")).toBeVisible();
+    // Un encabezado de nivel 2, como el de la lección hoy (T-616, 3b-1): lo buscan sus pruebas.
+    expect(screen.getByRole("heading", { level: 2, name: "Esta lección pide una suscripción" })).toBeVisible();
     expect(screen.getByText("Con una suscripción ves todo el catálogo.")).toBeVisible();
     expect(screen.getByRole("link", { name: "Ver planes" })).toHaveAttribute("href", `/planes?volver=${encodeURIComponent(BACK)}`);
     // La semilla de la flor, decorativa, en su tamaño chico.

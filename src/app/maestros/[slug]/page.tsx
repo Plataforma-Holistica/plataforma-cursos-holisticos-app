@@ -15,13 +15,13 @@ import { CourseCard } from "@/ui/course-card";
 import { toneClasses } from "@/ui/course-cover";
 import { cx } from "@/ui/cx";
 import { Filigree } from "@/ui/flower";
-import { practicePhoto } from "@/ui/photos/choice";
+import { teacherPhoto } from "@/ui/photos/choice";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 
 // La ficha de un maestro (PA-03; RF-303; T-210). Pública, y la misma para todos; solo pregunta
 // quién mira, para darle al alumno su barra (y al visitante la del sitio público, T-614). Sin retrato (los
-// carga contenido en PA-66), la foto de ambiente de su primera práctica (T-614, parte 4); sin práctica, la
-// inicial sobre el tono neutro. Debajo, sus cursos listados, los más nuevos
+// carga contenido en PA-66), una foto de ambiente elegida por maestro (T-614, parte 4; por su slug desde T-616, 3b-1); sin
+// práctica, la inicial sobre el tono neutro. Debajo, sus cursos listados, los más nuevos
 // primero, en una cuadrícula: con pocos cursos, una fila fija se lee mejor que un carrusel
 // (PA-03). Un maestro sin cursos listados, o que no está listado, no existe (PA-19). «Suscribirme» del visitante espera a la pantalla de
 // planes (T-30x).
@@ -41,7 +41,8 @@ export default async function TeacherRoute({ params }: { params: Promise<{ slug:
   if (found.kind === "unavailable") return <UnavailableScreen retryHref={teacherPath(slug) ?? ROUTES.landing} withSession={viewer.kind === "student"} />;
   const { teacher, courses } = found;
   const initial = [...teacher.name.trim()][0]?.toUpperCase() ?? "";
-  const photo = practicePhoto(teacher.practicePosition);
+  // La foto del maestro, por su slug, la misma de su tarjeta (T-616, 3b-1); sin práctica, la inicial.
+  const photo = teacher.practicePosition === null ? null : teacherPhoto(teacher.slug);
   // La barra, solo al alumno: después de saber quién mira (la ficha se recuerda 30 s).
   const nav = viewer.kind === "student" ? await studentNavFor(viewer.claims) : null;
 

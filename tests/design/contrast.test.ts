@@ -167,6 +167,42 @@ describe("contraste de los tokens (diseño, secciones 3.3 y 3.4)", () => {
     expect(value, "actualiza la tabla del diseño").toBe(9.78);
   });
 
+  // T-616, 3b-1 (decisión del carril A del 2026-11-12, y su revisión): en una cabecera con foto (`PageHeader`), todo su texto
+  // (la entradilla en `text-2` y el antetítulo en el oro pleno) pasa 4.5 sobre el peor caso: un píxel blanco bajo el velo del
+  // fondo, con el resplandor (`--glow-header`) encima, que aclara. El velo se lee de `page-header.tsx`: en la normal, lo más
+  // tenue de su degradado (arriba, donde va el antetítulo); en la alta, el punto hasta donde llega a 75 % desde abajo.
+  const header = readFileSync(fileURLToPath(new URL("../../src/ui/page-header.tsx", import.meta.url)), "utf8");
+  const glow = css.match(/--glow:\s*rgb\((\d+) (\d+) (\d+) \/ ([\d.]+)\)\s*;/)?.slice(1).map(Number) ?? [];
+  /** Un píxel blanco con el velo y, encima, el centro del resplandor. */
+  const worstUnder = (alpha: number): Rgb => {
+    const [r = 0, g = 0, b = 0, glowAlpha = 0] = glow;
+    return mix([r, g, b], glowAlpha, mix(rgbOf("bg"), alpha, [255, 255, 255]));
+  };
+
+  it.each([
+    ["text-2", "normal", /bg-linear-to-b from-bg\/(\d+) to-bg/, 4.77],
+    ["accent", "normal", /bg-linear-to-b from-bg\/(\d+) to-bg/, 5.34],
+    ["text-2", "alta", /bg-linear-to-t from-bg via-bg\/(\d+) via-\d+% to-bg\/\d+/, 4.77],
+    ["accent", "alta", /bg-linear-to-t from-bg via-bg\/(\d+) via-\d+% to-bg\/\d+/, 5.34],
+  ] as const)("%s sobre una foto blanca con el velo de la cabecera %s y su resplandor", (element, _, veil, expected) => {
+    expect(glow, "la hoja de tokens no define --glow como rgb con opacidad").toHaveLength(4);
+    const alpha = Number(header.match(veil)?.[1]) / 100;
+    expect(alpha, "el velo no está donde se busca").toBeGreaterThan(0);
+    const value = ratio(rgbOf(element), worstUnder(alpha));
+    expect(value).toBeGreaterThanOrEqual(AA_TEXT);
+    expect(value, "actualiza la tabla del diseño").toBe(expected);
+  });
+
+  // En la alta, el texto empieza bajo su aire de arriba (64 px en el teléfono, 96 desde `sm`) y se apoya abajo. La cabecera
+  // mide 224 px en el teléfono (más con un saludo de dos renglones: hasta unos 320) y 368 desde `sm`: el texto llega a lo más
+  // al 80 % de su alto desde abajo ((320 − 64) / 320). Hasta ahí, el velo no baja de 75 %; arriba, la foto se ve.
+  it("en la cabecera alta, el velo de 75 % llega hasta el 80 % desde abajo, donde termina el texto", () => {
+    const position = Number(header.match(/bg-linear-to-t from-bg via-bg\/\d+ via-(\d+)%/)?.[1]);
+    expect(position).toBeGreaterThanOrEqual(80);
+    expect(header).toMatch(/hero \? "pt-16 [^"]*sm:pt-24/);
+    expect(header).toMatch(/min-h-56 [^"]*sm:min-h-92/);
+  });
+
   it("text-3 es el texto más tenue: no hay un gris más claro que pase por texto", () => {
     const greys = ["text", "text-2", "text-3", "text-disabled"].map((token) => ratio(rgbOf(token), rgbOf("bg")));
     expect(greys).toEqual([...greys].sort((a, b) => b - a));

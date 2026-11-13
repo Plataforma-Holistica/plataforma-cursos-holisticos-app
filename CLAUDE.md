@@ -1408,6 +1408,22 @@ que no se ve leyendo un solo archivo:
   faro en Explorar; «Para empezar» también en filas; reproducir solo en «Continuar viendo»; selectores sin etiqueta visible; el marcador de
   icono solo en Explorar. Revierten decisiones de Sergio del 2026-11-05 y del 2026-10-28 (la foto alternada, las prácticas lado a lado y
   «Guardar» bajo la tarjeta), por la dirección del rediseño: las anota el carril A. Para el A: `CourseCard` cambió en la portada.
+- **Lo que T-616 suma al carril B** (la 3b-1, la barra, el velo y la foto por maestro, sin migración; plan en
+  `~/.claude/plans/t616-sol3b-plan.md`, con su revisión de diseño). **La barra del alumno** lleva dos `<nav>`: «Principal» (los cuatro
+  enlaces, también la lista de abajo en el teléfono) y «Tu cuenta y accesos» (los accesos por rol y el menú de la persona). **La llegada a
+  Mi lista** (`my-list-block.tsx`) toma el foco al montarse solo si la dirección trae su ancla y además hay una marca de un solo uso que deja
+  el clic de la barra (`takeArrival()`, en la memoria del módulo de `my-list-link.tsx`, de cliente) o es la primera carga del documento
+  y fue una navegación (`navigate` en `performance.getEntriesByType("navigation")`, cada entrada una sola vez): así una navegación
+  nativa antes de hidratar también llega, y recargar o «Atrás» (también sin la caché de ida y vuelta) no. La marca se consume al montarse, haya ancla o no. Con Ctrl, Cmd, Shift, Alt u otro botón,
+  el clic no avisa ni marca. **`FlowerState`** ganó `titleLevel` (1 a 3; sin él, el párrafo de siempre) y `live` (si es región viva; por
+  omisión sigue a `waiting`); `PaywallState` pinta su título como `h2`. **El velo de `PageHeader`** es de 75 % hasta el 80 % del alto, de
+  modo que todo su texto (también el antetítulo en oro de la alta en el teléfono) pasa 4.5 en el peor caso con el resplandor encima;
+  `tests/design/contrast.test.ts` lo mide leyendo las clases del componente. **La foto de un maestro sin retrato** se elige por maestro
+  (`teacherPhoto(slug)`, un hash estable sobre `PRACTICE_PHOTOS`, una lista): al sumar fotos se reparten solas (y se reparten de nuevo);
+  `TeacherCard` recibe `slug` (opcional: sin él lo saca de su enlace, como hace todavía la portada pública). Cambiaron por el requisito
+  pruebas de `my-list.test.tsx`, `choice.test.ts`, `teacher-card.test.tsx`, `paywall-state.test.tsx` y `contrast.test.ts`. Decisiones mías
+  sin confirmar: el nombre «Tu cuenta y accesos» también para quien no tiene accesos; la marca en la memoria del módulo. Para el A: las dos
+  fotos nuevas van en `PRACTICE_PHOTOS`, con su crédito.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

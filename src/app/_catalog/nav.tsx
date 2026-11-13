@@ -23,6 +23,11 @@ import { PersonMenu } from "./person-menu";
 // veces (los accesos y Cuenta) se esconde con `hidden` en el ancho que no le toca, y entonces el lector
 // tampoco lo lee. Los accesos son una comodidad: quién entra lo decide la guarda de esa pantalla. Las dos
 // barras se retiran con el reproductor a pantalla completa propia (`student-top-bar`, `student-bottom-bar`).
+//
+// Desde la 3b-1 (decisión mía sin confirmar), los accesos por rol y el menú de la persona van en una segunda navegación
+// con su nombre («Tu cuenta y accesos»), y no en un `<div>` sin región. No caben en «Principal» sin partirla: en el
+// teléfono esa es la barra fija de abajo, y el menú va arriba. Dos navegaciones con nombres distintos (axe,
+// `landmark-unique`).
 
 const text = messages.browse.nav;
 
@@ -90,7 +95,7 @@ export function StudentNav({ current, access, email }: { current?: Current; acce
             })}
           </ul>
         </nav>
-        <div className="ml-auto flex items-center gap-2">
+        <nav aria-label={text.accountLabel} className="ml-auto flex items-center gap-2">
           {/* En computadora, los accesos por rol aparte del menú de la persona, tras un filete tenue. */}
           {shown.length > 0 && (
             <div data-role-access className="mr-2 hidden items-center gap-2 border-r border-edge-ring pr-4 sm:flex">
@@ -152,7 +157,7 @@ export function StudentNav({ current, access, email }: { current?: Current; acce
               </ul>
             </div>
           </PersonMenu>
-        </div>
+        </nav>
       </div>
     </header>
   );

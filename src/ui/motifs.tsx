@@ -4,8 +4,8 @@ import { cx } from "./cx";
 // dibujo geométrico de trazo fino, de la familia de la flor de la vida, para que ocho portadas juntas no parezcan
 // imágenes sin cargar y dos de la misma práctica se distingan.
 //
-// - El motivo sale de la práctica (`motifFor`): por su orden en el catálogo (PA-67), como la foto de la práctica
-//   (`practicePhoto`), para que ocho prácticas seguidas nunca repitan; sin orden, por un hash de su identificador.
+// - El motivo sale de la práctica (`motifFor`): por su orden en el catálogo (PA-67), para que ocho prácticas seguidas
+//   nunca repitan; sin orden, por un hash de su identificador.
 //   Con el hash solo, cuatro prácticas repetían motivo más de la mitad de las veces (respiración y meditación
 //   caían las dos en los círculos concéntricos).
 // - El ángulo, la escala y el recorte salen de una semilla del curso (`placementFor`): el mismo curso se ve
