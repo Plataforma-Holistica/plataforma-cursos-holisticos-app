@@ -107,6 +107,31 @@ describe("la pantalla de la cuenta (PA-25)", () => {
     expect(screen.getByRole("link", { name: "Ver y borrar lo que escribiste" })).toHaveAttribute("href", "/cuenta/comentarios");
   });
 
+  // T-616, 3b-3: la cabecera del rediseño, sin foto (la filigrana y el resplandor), con una entradilla y sin antetítulo
+  // («Cuenta» no cuelga de nada: decisión mía sin confirmar). Los bloques van debajo, en su columna de formulario.
+  it("la cabecera del rediseño: el título y la entradilla en ella, sin antetítulo; los bloques debajo, en la columna del formulario", async () => {
+    const { container } = render(<AccountScreen name="Ana de Prueba" email="ana@prueba.test" sessions={ALONE} />);
+    const header = container.querySelector("[data-page-header]");
+    expect(header).not.toBeNull();
+    expect(header).toContainElement(screen.getByRole("heading", { level: 1, name: "Cuenta" }));
+    // Cambió por el requisito (revisión del carril A): la entradilla nombra también el correo, que tiene su bloque.
+    expect(within(header as HTMLElement).getByText("Tu nombre, tu correo y tu contraseña, dónde tienes la sesión abierta y lo que comentaste.")).toBeVisible();
+    expect(header?.querySelector(".eyebrow")).toBeNull();
+    expect(header?.querySelector("img")).toBeNull();
+    expect(screen.getByRole("main")).toHaveClass("max-w-page");
+    const block = screen.getByRole("region", { name: "Nombre" });
+    expect(header).not.toContainElement(block);
+    expect(block.closest(".max-w-form")).not.toBeNull();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  // T-616, 3b-3 (revisión del carril A): un correo sin espacios no ensancha la página a 320 px; se parte donde haga falta.
+  it("un correo largo se parte en vez de ensanchar la pantalla", () => {
+    const long = "una.direccion.de.correo.muy.larga.para.probar@prueba.test";
+    render(<AccountScreen name="Ana" email={long} sessions={ALONE} />);
+    expect(within(screen.getByRole("region", { name: "Correo" })).getByText(long)).toHaveClass("wrap-anywhere");
+  });
+
   it("en reposo: el nombre guardado en su campo, el correo a la vista y sin nada que anunciar", async () => {
     const { container } = render(<AccountScreen name="Ana de Prueba" email="ana@prueba.test" sessions={ALONE} />);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Cuenta");

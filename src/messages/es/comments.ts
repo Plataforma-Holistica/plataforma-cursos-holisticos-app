@@ -64,6 +64,8 @@ export const comments = defineMessages({
   },
   mine: {
     pageTitle: "Mis comentarios",
+    // El antetítulo de la cabecera (T-616, 3b-3): la pantalla cuelga de la cuenta.
+    eyebrow: "Cuenta",
     title: "Mis comentarios",
     intro: "Lo que escribiste en las lecciones. Desde aquí puedes borrarlo, también si ya no tienes acceso a la lección.",
     empty: "Todavía no has escrito comentarios.",

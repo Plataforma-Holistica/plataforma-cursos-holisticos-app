@@ -1446,6 +1446,20 @@ que no se ve leyendo un solo archivo:
   Cambió por el requisito el texto de `about` en las pruebas de la pantalla. Decisiones del carril A sin confirmar por Sergio: PA-33 crece
   en el teléfono y no se pega; «Sobre esta lección» sin el módulo; el reproductor en oro con los menús oscuros. Mías sin confirmar: lo
   cargado en 0.25 y la pista en 0.2; lo elegido de la velocidad en `surface-3`. Para el A: nada que le toque.
+- **Lo que T-616 suma al carril B** (la 3b-3, la cuenta y «Mis comentarios», sin migración; plan en `~/.claude/plans/t616-sol3b-plan.md`,
+  «La 3b-3 en detalle»). **`PageHeader` ganó `titleRef`** (el `<h1>` recibe la referencia, `tabIndex={-1}` y sin contorno, para llevarle el
+  foco por programa; sin ella o con ella nula, el `<h1>` de siempre) **y `above`** (lo de arriba del antetítulo, dentro de la cabecera, en un
+  contenedor `self-start` para que un «Volver a…» no se estire a toda la fila; con `false` o `null` no pinta nada). **La cuenta (PA-25)**
+  lleva la cabecera sin foto con su título y una entradilla (`account.manage.lead`, que nombra también el correo), sin antetítulo; el correo
+  va en `wrap-anywhere` (sin espacios ensanchaba la página 97 px a 320). **«Mis comentarios» (PA-24)**, «Volver a Cuenta» en `above`, el
+  antetítulo `comments.mine.eyebrow`, su título con `titleRef` y su entradilla. El foco sigue llegando al título después de borrar: lo
+  exigen `comentarios.equipo.ts` y `my-comments.test.tsx`, que manda la respuesta de la acción y la lista sin el comentario en la misma
+  transición, como Next (con un `rerender` fuera de ella, React no aplica la respuesta). En las dos, el `<main>` va en `max-w-page` y los
+  bloques debajo, en `px-4 sm:px-8` y una columna `max-w-form` a la izquierda, alineados con el título (su ancho útil pasa de 448 a 480 px).
+  `contrast.test.ts` mide la entradilla y «Volver a…» en `text-2` sobre el resplandor sin foto (8.74), leyendo que los dos componentes
+  siguen en `text-text-2`. Decisiones mías sin confirmar: la cuenta sin antetítulo y su entradilla; «Volver a Cuenta» dentro de la
+  cabecera; los bloques a la izquierda y no al centro; «Cuenta» dos veces seguidas en «Mis comentarios» (el enlace y el antetítulo).
+  Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta
