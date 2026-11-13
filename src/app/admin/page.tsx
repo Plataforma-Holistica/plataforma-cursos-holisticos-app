@@ -8,11 +8,12 @@ import { opensPortal } from "@/services/account/nav-access";
 import { ROUTES } from "@/services/account/navigation";
 import { CAPABILITIES } from "@/services/account/team";
 import { teacherStanding } from "@/services/teachers/teachers";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
+import { FlowerState } from "@/ui/flower-state";
 import { StatTile } from "@/ui/stat-tile";
 import { TextLink } from "@/ui/text-link";
 
 import { AdminFrame } from "./_lib/frame";
+import { AdminMain } from "./_lib/shell";
 import { ForbiddenScreen } from "./_lib/states";
 
 // PA-60 · Inicio de administración (`/admin`), en su versión mínima: el menú lateral (T-614,
@@ -50,35 +51,43 @@ export default async function AdminHomePage() {
 
   return (
     <AdminFrame path={ROUTES.admin} capabilities={capabilities} portal={portal}>
-      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-form flex-col gap-6 px-4 py-16 outline-none">
-        <h1 className="text-h1">{text.admin.title}</h1>
-        <div className="flex flex-col gap-2 text-text-2">
-          {email !== null && <p>{t(text.home.signedInAs, { email })}</p>}
-          {billing.kind !== "unavailable" && !pendingWork && <p>{text.admin.noPending}</p>}
-        </div>
-        {billing.kind !== "none" && (
-          <section aria-labelledby="inicio-pendientes" className="flex flex-col gap-3">
-            <h2 id="inicio-pendientes" className="text-h3">
-              {text.admin.pendingTitle}
-            </h2>
-            <div className="flex flex-col gap-2">
-              <StatTile
-                label={text.admin.billingCard}
-                value={billing.kind === "count" ? String(billing.count) : null}
-                context={billing.kind === "unavailable" ? text.admin.billingCardUnavailable : undefined}
-                {...(pendingWork ? { tone: "attention" as const } : {})}
-              />
-              <p className="text-body-s">
-                <TextLink href={ROUTES.billingEvents}>{text.admin.billingCardLink}</TextLink>
-              </p>
+      <AdminMain title={text.admin.title} lead={email !== null ? <p>{t(text.home.signedInAs, { email })}</p> : undefined}>
+        {/* Lo que espera, por área (T-616, solicitud 6): cada tarjeta bajo el nombre de su capacidad, en la misma
+            rejilla que las cifras de un periodo. Las tarjetas llegan con cada tarea; hoy solo hay la de finanzas. */}
+        {billing.kind === "none" ? (
+          // Sin ninguna tarjeta que le toque: el vacío, con la semilla.
+          <FlowerState title={text.admin.noPending} className="surface-raised" />
+        ) : (
+          <section aria-labelledby="inicio-pendientes" className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <h2 id="inicio-pendientes" className="text-h3">
+                {text.admin.pendingTitle}
+              </h2>
+              {billing.kind !== "unavailable" && !pendingWork && <p className="text-text-2">{text.admin.noPending}</p>}
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="flex flex-col gap-2">
+                <p className="eyebrow text-accent-muted">{text.admin.capabilities.finance}</p>
+                <StatTile
+                  label={text.admin.billingCard}
+                  value={billing.kind === "count" ? String(billing.count) : null}
+                  context={billing.kind === "unavailable" ? text.admin.billingCardUnavailable : undefined}
+                  {...(pendingWork ? { tone: "attention" as const } : {})}
+                />
+                <p className="text-body-s">
+                  <TextLink href={ROUTES.billingEvents}>{text.admin.billingCardLink}</TextLink>
+                </p>
+              </div>
             </div>
           </section>
         )}
-        <section className="flex flex-col gap-2">
+        <section className="flex flex-col gap-3">
           <h2 className="text-h3">{text.admin.capabilitiesTitle}</h2>
-          <ul className="list-disc pl-6">
+          <ul className="flex flex-wrap gap-2">
             {capabilities.map((capability) => (
-              <li key={capability}>{text.admin.capabilities[capability]}</li>
+              <li key={capability} className="rounded-md bg-surface-2 px-3 py-1 text-body-s text-text">
+                {text.admin.capabilities[capability]}
+              </li>
             ))}
           </ul>
         </section>
@@ -87,7 +96,7 @@ export default async function AdminHomePage() {
             <TextLink href={ROUTES.portalInvitation}>{t(text.admin.teacherInvitation)}</TextLink>
           </p>
         )}
-      </main>
+      </AdminMain>
     </AdminFrame>
   );
 }

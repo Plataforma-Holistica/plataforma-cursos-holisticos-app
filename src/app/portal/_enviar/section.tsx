@@ -9,6 +9,7 @@ import { legalBlocks } from "@/services/legal/texts";
 import { BackLink } from "@/ui/back-link";
 
 import { PortalFrame } from "../_lib/frame";
+import { PortalMain } from "../_lib/shell";
 import { submitView } from "./rows";
 import { SubmitScreen } from "./screen";
 
@@ -30,11 +31,9 @@ export async function SubmitSection({ claims, course, readOnly }: { claims: Veri
   if (readOnly) {
     return (
       <PortalFrame current={ROUTES.portalCourses} readOnly>
-        <div className="flex flex-col gap-3">
-          <BackLink href={back}>{text.back}</BackLink>
-          <h1 className="text-h1 break-words">{draft.value.title}</h1>
+        <PortalMain title={draft.value.title} above={<BackLink href={back}>{text.back}</BackLink>} measure="reading">
           <p className="text-text-2">{text.readOnly}</p>
-        </div>
+        </PortalMain>
       </PortalFrame>
     );
   }

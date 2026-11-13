@@ -12,6 +12,7 @@ import { StatTile } from "@/ui/stat-tile";
 import { TextLink } from "@/ui/text-link";
 
 import { PortalFrame } from "../_lib/frame";
+import { PortalMain } from "../_lib/shell";
 
 import type { StudentRowView, StudentsView } from "./rows";
 
@@ -24,7 +25,7 @@ const text = portal.students;
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
     <section aria-labelledby={`${id}-titulo`} className="flex flex-col gap-4">
-      <h2 id={`${id}-titulo`} className="text-h2">
+      <h2 id={`${id}-titulo`} className="text-h3">
         {title}
       </h2>
       {children}
@@ -102,39 +103,35 @@ export function StudentsScreen({ view, readOnly }: { view: StudentsView; readOnl
   const { tiles } = view;
   return (
     <PortalFrame current={ROUTES.portalCourses} readOnly={readOnly}>
-      <div className="flex flex-col gap-3">
-        <BackLink href={ROUTES.portalCourses}>{text.back}</BackLink>
-        <p className="text-body-s text-text-2">{text.eyebrow}</p>
-        <h1 className="text-h1">{view.title}</h1>
-        <p className="max-w-reading text-text-2">{text.aliasNote}</p>
-      </div>
+      <PortalMain title={view.title} above={<BackLink href={ROUTES.portalCourses}>{text.back}</BackLink>} eyebrow={text.eyebrow} lead={<p>{text.aliasNote}</p>}>
 
-      <Section id="como-va" title={text.figuresTitle}>
-        {view.figuresAt !== null && <p className="text-body-s text-text-2">{view.figuresAt}</p>}
-        {view.notice !== null && <InlineAlert tone={view.notice.tone}>{view.notice.text}</InlineAlert>}
-        {view.nobody ? (
-          <p className="text-text-2">{text.nobody}</p>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-3">
-            <StatTile label={text.figures.started} value={tiles.started} />
-            <StatTile label={text.figures.inProgress} value={tiles.inProgress} />
-            <StatTile label={text.figures.finished} value={tiles.finished} />
-          </div>
+        <Section id="como-va" title={text.figuresTitle}>
+          {view.figuresAt !== null && <p className="text-body-s text-text-2">{view.figuresAt}</p>}
+          {view.notice !== null && <InlineAlert tone={view.notice.tone}>{view.notice.text}</InlineAlert>}
+          {view.nobody ? (
+            <p className="text-text-2">{text.nobody}</p>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-3">
+              <StatTile label={text.figures.started} value={tiles.started} />
+              <StatTile label={text.figures.inProgress} value={tiles.inProgress} />
+              <StatTile label={text.figures.finished} value={tiles.finished} />
+            </div>
+          )}
+        </Section>
+
+        {!view.nobody && (
+          <>
+            <Section id="por-leccion" title={text.lessonsTitle}>
+              <p className="max-w-reading text-body-s text-text-2">{text.lessonsNote}</p>
+              <LessonFunnel id="avance-por-leccion" caption={text.lessonsCaption} rows={view.lessons} max={view.funnelMax} empty={text.noLessons} />
+            </Section>
+
+            <Section id="alumnos" title={text.listTitle}>
+              <List list={view.list} />
+            </Section>
+          </>
         )}
-      </Section>
-
-      {!view.nobody && (
-        <>
-          <Section id="por-leccion" title={text.lessonsTitle}>
-            <p className="max-w-reading text-body-s text-text-2">{text.lessonsNote}</p>
-            <LessonFunnel id="avance-por-leccion" caption={text.lessonsCaption} rows={view.lessons} max={view.funnelMax} empty={text.noLessons} />
-          </Section>
-
-          <Section id="alumnos" title={text.listTitle}>
-            <List list={view.list} />
-          </Section>
-        </>
-      )}
+      </PortalMain>
     </PortalFrame>
   );
 }

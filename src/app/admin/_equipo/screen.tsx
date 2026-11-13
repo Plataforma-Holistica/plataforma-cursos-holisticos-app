@@ -5,10 +5,10 @@ import { flushSync } from "react-dom";
 
 import { admin } from "@/messages/es/admin";
 import { ROUTES } from "@/services/account/navigation";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
 
 import { CodeBlock } from "../_lib/code-block";
+import { AdminMain } from "../_lib/shell";
 
 import { freshCodeAction, invitationsAction, inviteAction, resetAction, teamAction } from "./actions";
 import { INVITATIONS_BLOCK_ID, InvitationsBlock } from "./invitations-block";
@@ -71,17 +71,14 @@ export function TeamScreen({ view }: TeamScreenProps) {
   }, [shownCode]);
 
   return (
-    <main
-      id={MAIN_CONTENT_ID}
-      tabIndex={-1}
+    <AdminMain
+      area="config"
+      title={text.title}
+      lead={<p>{text.intro}</p>}
+      measure="reading"
       // El siguiente envío de cualquier bloque también lo esconde: ya cumplió.
       onSubmitCapture={() => setHiddenCode(shownCode)}
-      className="mx-auto flex max-w-form flex-col gap-10 px-4 py-16 outline-none"
     >
-      <div className="flex flex-col gap-2">
-        <h1 className="text-h1">{text.title}</h1>
-        <p className="text-text-2">{text.intro}</p>
-      </div>
       {!view.canChange && (
         <CodeBlock
           blockId={CODE_BLOCK_ID}
@@ -114,6 +111,6 @@ export function TeamScreen({ view }: TeamScreenProps) {
       <p className="text-body-s">
         <TextLink href={ROUTES.admin}>{text.backToAdmin}</TextLink>
       </p>
-    </main>
+    </AdminMain>
   );
 }

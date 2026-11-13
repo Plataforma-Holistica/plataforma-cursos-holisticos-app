@@ -7,6 +7,7 @@ import { t } from "@/messages/format";
 import { Button } from "@/ui/button";
 import { InlineAlert } from "@/ui/inline-alert";
 
+import { PortalMain } from "../_lib/shell";
 import { failureText } from "../_lib/words";
 import { discardVersionAction } from "./actions";
 import type { DiscardState } from "./outcomes";
@@ -34,25 +35,24 @@ export function DiscardVersionScreen({ title, confirm, path, back, wasSent }: Di
   const [state, action, pending] = useActionState(discardVersionAction, IDLE, `${path}#${BLOCK_ID}`);
 
   return (
-    <section id={BLOCK_ID} aria-labelledby="version-descartar-encabezado" className="flex max-w-form flex-col gap-6">
-      <h1 id="version-descartar-encabezado" className="text-h1">
-        {text.title}
-      </h1>
-      <p className="text-body-l text-text-2">{t(text.body, { title })}</p>
-      {wasSent && <p className="text-text-2">{text.keptNote}</p>}
-      {state.kind === "failed" && (
-        <InlineAlert tone="danger" live>
-          {failureText(state.reason)}
-        </InlineAlert>
-      )}
-      <form action={action} className="flex flex-wrap gap-3">
-        <Button href={back} variant="secondary">
-          {text.cancel}
-        </Button>
-        <Button type="submit" name="do" value={confirm} variant="danger" loading={pending} loadingLabel={text.discarding}>
-          {text.confirm}
-        </Button>
-      </form>
-    </section>
+    <PortalMain title={text.title} titleId="version-descartar-encabezado" measure="reading">
+      <section id={BLOCK_ID} aria-labelledby="version-descartar-encabezado" className="flex max-w-form flex-col gap-6 surface-raised p-4 sm:p-5">
+        <p className="text-body-l break-words text-text-2">{t(text.body, { title })}</p>
+        {wasSent && <p className="text-text-2">{text.keptNote}</p>}
+        {state.kind === "failed" && (
+          <InlineAlert tone="danger" live>
+            {failureText(state.reason)}
+          </InlineAlert>
+        )}
+        <form action={action} className="flex flex-wrap gap-3">
+          <Button href={back} variant="secondary">
+            {text.cancel}
+          </Button>
+          <Button type="submit" name="do" value={confirm} variant="danger" loading={pending} loadingLabel={text.discarding}>
+            {text.confirm}
+          </Button>
+        </form>
+      </section>
+    </PortalMain>
   );
 }

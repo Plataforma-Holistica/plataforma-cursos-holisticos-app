@@ -56,6 +56,56 @@ export type PlansViewer =
   | { kind: "has_access" }
   | { kind: "in_progress"; session: string | null };
 
+/** Lo que dice la tarjeta de un plan: el nombre, el total, que lleva IVA y cada cuánto se cobra, y en el anual lo que equivale al mes.
+ * Lo comparten `/planes` y la portada, para que las dos digan lo mismo del mismo monto. */
+export function planCardText(plan: CheckoutPlan, amountCents: number): { name: string; price: string; repeat: string; equivalent: string | null } {
+  return {
+    name: plan === "monthly" ? text.monthly : text.annual,
+    price: t(plan === "monthly" ? text.perMonth : text.perYear, { price: priceText(amountCents) }),
+    repeat: t(text.planNote, { repeat: plan === "monthly" ? text.monthlyRepeat : text.annualRepeat }),
+    // Solo de un total que es un entero positivo de centavos: de otro, «Equivale a -$0.00» no diría nada cierto.
+    equivalent:
+      plan === "annual" && Number.isInteger(amountCents) && amountCents > 0 ? t(text.annualEquivalent, { price: priceText(monthlyEquivalent(amountCents)) }) : null,
+  };
+}
+
+export interface ShowcaseCard {
+  plan: CheckoutPlan;
+  name: string;
+  price: string;
+  repeat: string;
+  equivalent: string | null;
+  href: string;
+  chooseLabel: string;
+}
+
+/** Lo que la portada sabe de los precios (T-616, solicitud 4b): lo que contesta la vitrina de `src/services/billing/`, sin nada más. */
+export type ShowcaseFacts =
+  | { kind: "ready"; plans: readonly { plan: CheckoutPlan; amountCents: number }[]; recurringVersion: number | null }
+  | { kind: "unavailable" };
+
+export type ShowcaseView = { kind: "hidden" } | { kind: "unavailable" } | { kind: "ready"; cards: ShowcaseCard[] };
+
+/**
+ * La sección de los planes en la portada. A la venta con el mismo criterio que `plansView`: planes, el texto del cobro recurrente y su
+ * página; si no, la sección no aparece (decisión de Sergio del 2026-11-12). Si no se supo, va sin cifras. Cada tarjeta lleva a elegir
+ * su plan en `/planes`, sin el monto.
+ */
+export function showcaseView(facts: ShowcaseFacts, legalHref: (doc: "recurring" | "refund", version: number | null) => string | null): ShowcaseView {
+  if (facts.kind === "unavailable") return { kind: "unavailable" };
+  const recurringHref = facts.recurringVersion === null ? null : legalHref("recurring", facts.recurringVersion);
+  if (facts.plans.length === 0 || recurringHref === null) return { kind: "hidden" };
+  return {
+    kind: "ready",
+    cards: facts.plans.map(({ plan, amountCents }) => ({
+      plan,
+      ...planCardText(plan, amountCents),
+      href: `${plansHref(plan, null)}#${PAY_BLOCK_ID}`,
+      chooseLabel: t(text.chooseThis, { plan: plan === "monthly" ? text.monthly : text.annual }),
+    })),
+  };
+}
+
 export function plansView(offer: Offer, query: PlansQuery, viewer: PlansViewer, legalHref: (doc: "recurring" | "refund", version: number | null) => string | null): PlansView {
   const recurringHref = offer.recurring === null ? null : legalHref("recurring", offer.recurring.version);
   if (offer.plans.length === 0 || offer.recurring === null || recurringHref === null) return { kind: "not_for_sale" };
@@ -64,10 +114,7 @@ export function plansView(offer: Offer, query: PlansQuery, viewer: PlansViewer, 
 
   const cards = offer.plans.map((each): PlanCard => ({
     plan: each.plan,
-    name: each.plan === "monthly" ? text.monthly : text.annual,
-    price: t(each.plan === "monthly" ? text.perMonth : text.perYear, { price: priceText(each.amountCents) }),
-    repeat: t(text.planNote, { repeat: each.plan === "monthly" ? text.monthlyRepeat : text.annualRepeat }),
-    equivalent: each.plan === "annual" ? t(text.annualEquivalent, { price: priceText(monthlyEquivalent(each.amountCents)) }) : null,
+    ...planCardText(each.plan, each.amountCents),
     // Al elegir, la página baja a «Antes de pagar»: en el teléfono quedaría fuera de la vista.
     href: `${plansHref(each.plan, query.returnTo)}#${PAY_BLOCK_ID}`,
     chooseLabel: t(text.chooseThis, { plan: each.plan === "monthly" ? text.monthly : text.annual }),

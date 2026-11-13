@@ -10,6 +10,7 @@ import { InlineAlert } from "@/ui/inline-alert";
 import { TextLink } from "@/ui/text-link";
 
 import { PortalFrame } from "../_lib/frame";
+import { PortalMain } from "../_lib/shell";
 
 import { commentCursor } from "@/app/_comments/view";
 
@@ -73,39 +74,35 @@ export async function CommentsSection({ claims, readOnly, search }: { claims: Ve
 
   return (
     <PortalFrame current={ROUTES.portalComments} readOnly={readOnly}>
-      <div className="flex max-w-reading flex-col gap-3">
-        {/* Con `tabIndex`, para que reciba el foco cuando lo pulsado se va con la respuesta. */}
-        <h1 id={PA45_TITLE} tabIndex={-1} className="text-h1 outline-none">
-          {text.portal.title}
-        </h1>
-        <p className="text-text-2">{text.portal.intro}</p>
-      </div>
-      <nav aria-label={text.portal.filters} className="flex flex-col gap-2">
-        <ul className="flex flex-wrap gap-x-4 gap-y-2 text-body-s">
-          {filterLink(text.portal.allCourses, { course: null, unanswered: filters.unanswered })}
-          {courses.courses.map((course) => filterLink(course.title, { course: course.id, unanswered: filters.unanswered }))}
-        </ul>
-        <ul className="flex flex-wrap gap-x-4 text-body-s">
-          {filterLink(text.portal.everything, { course: filters.course, unanswered: false })}
-          {filterLink(text.portal.unanswered, { course: filters.course, unanswered: true })}
-        </ul>
-      </nav>
-      {read.kind === "closed" || paged === null ? (
-        <InlineAlert tone="warning">{t(text.portal.closed)}</InlineAlert>
-      ) : (
-        <>
-          {filters.from !== null && <TextLink href={teacherCommentsHref(filters)}>{text.portal.newest}</TextLink>}
-          <TeacherComments
-            items={paged.items}
-            here={teacherHereHref(filters, paged.pagedThread, paged.after)}
-            filters={filters}
-            pagedThread={paged.pagedThread}
-            write={read.write}
-            unanswered={filters.unanswered}
-          />
-          {read.next !== null && <TextLink href={teacherCommentsHref(filters, read.next)}>{text.portal.more}</TextLink>}
-        </>
-      )}
+      {/* El título recibe el foco (`titleFocusable`) cuando lo pulsado se va con la respuesta. */}
+      <PortalMain title={text.portal.title} titleId={PA45_TITLE} titleFocusable section lead={<p>{text.portal.intro}</p>}>
+        <nav aria-label={text.portal.filters} className="flex flex-col gap-2 surface-raised p-4 sm:px-5">
+          <ul className="flex flex-wrap gap-x-4 gap-y-2 text-body-s">
+            {filterLink(text.portal.allCourses, { course: null, unanswered: filters.unanswered })}
+            {courses.courses.map((course) => filterLink(course.title, { course: course.id, unanswered: filters.unanswered }))}
+          </ul>
+          <ul className="flex flex-wrap gap-x-4 text-body-s">
+            {filterLink(text.portal.everything, { course: filters.course, unanswered: false })}
+            {filterLink(text.portal.unanswered, { course: filters.course, unanswered: true })}
+          </ul>
+        </nav>
+        {read.kind === "closed" || paged === null ? (
+          <InlineAlert tone="warning">{t(text.portal.closed)}</InlineAlert>
+        ) : (
+          <>
+            {filters.from !== null && <TextLink href={teacherCommentsHref(filters)}>{text.portal.newest}</TextLink>}
+            <TeacherComments
+              items={paged.items}
+              here={teacherHereHref(filters, paged.pagedThread, paged.after)}
+              filters={filters}
+              pagedThread={paged.pagedThread}
+              write={read.write}
+              unanswered={filters.unanswered}
+            />
+            {read.next !== null && <TextLink href={teacherCommentsHref(filters, read.next)}>{text.portal.more}</TextLink>}
+          </>
+        )}
+      </PortalMain>
     </PortalFrame>
   );
 }

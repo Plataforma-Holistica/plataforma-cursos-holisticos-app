@@ -2,9 +2,13 @@ import Image from "next/image";
 
 import { PublicFooter } from "@/app/_public/footer";
 import { PublicHeader } from "@/app/_public/header";
+import { PlanIncludes } from "@/app/planes/includes";
+import { plansLegalHref } from "@/app/planes/legal-href";
+import { showcaseView, type ShowcaseCard } from "@/app/planes/view";
 import { visitorOnly } from "@/app/_lib/guard";
 import { messages } from "@/messages";
 import { coursePath, ROUTES, teacherPath } from "@/services/account/navigation";
+import { planShowcase } from "@/services/billing/showcase-service";
 import { homeShelf, type ShelfCourse } from "@/services/browse/browse";
 import { Button } from "@/ui/button";
 import { Carousel } from "@/ui/carousel";
@@ -20,11 +24,14 @@ import { TextLink } from "@/ui/text-link";
 // La portada pública (PA-01; T-614, parte 2, solo lo visual: lo indexable sigue en T-606). Quien tiene
 // sesión se va a su inicio (`visitorOnly`). De arriba abajo: la barra, el encabezado con la foto de la
 // portada y su velo, una muestra del catálogo, el curso abierto si lo hay, quienes enseñan, «Cómo
-// funciona» y el pie.
+// funciona», los planes y el pie.
 //
 // Decisiones de Sergio del 2026-11-05: el encabezado lleva solo la foto (las portadas de los cursos van
-// en la muestra, justo abajo); el botón principal dice «Crear cuenta» y lleva al registro hasta que
-// existan los planes; sin precio ni preguntas frecuentes hasta que existan sus pantallas. Decisiones mías
+// en la muestra, justo abajo), y sin preguntas frecuentes hasta que exista su pantalla. Desde T-616
+// (solicitud 4b; decisiones de Sergio del 2026-11-12, RF-201): con planes a la venta, el botón principal
+// dice «Suscribirme» y lleva a los planes (si no, sigue «Crear cuenta» al registro), y los planes van con su
+// precio total e «IVA incluido», los mismos textos que `/planes`. Sin venta, la sección no aparece; si no se
+// pudieron leer los precios, va sin cifras. Decisiones mías
 // sin confirmar: la muestra son los cursos listados más nuevos (no hay todavía una selección de
 // Contenido), sin «Ver todo» (explorar pide sesión), y quienes enseñan son los maestros con cursos
 // listados.
@@ -38,8 +45,24 @@ const text = messages.landing;
 
 const OPEN_ID = "curso-abierto";
 const HOW_ID = "como-funciona";
+const PLANS_ID = "portada-planes";
 
 const HOW = [text.how.catalog, text.how.lessons, text.how.pace] as const;
+
+/** Un plan en la portada: lo mismo que su tarjeta de `/planes` dice, y a elegirlo allá. */
+function planCard(card: ShowcaseCard) {
+  return (
+    <li key={card.plan} className="flex flex-col items-start gap-2 rounded-md border border-border bg-surface-1 p-6">
+      <h3 className="text-h3">{card.name}</h3>
+      <p className="text-h2">{card.price}</p>
+      <p className="text-body-s text-text-2">{card.repeat}</p>
+      {card.equivalent !== null && <p className="text-body-s text-text-2">{card.equivalent}</p>}
+      <Button href={card.href} variant="secondary" className="mt-2">
+        {card.chooseLabel}
+      </Button>
+    </li>
+  );
+}
 
 function courseCard(course: ShelfCourse) {
   const href = coursePath(course.slug);
@@ -61,7 +84,9 @@ function courseCard(course: ShelfCourse) {
 
 export default async function LandingPage() {
   await visitorOnly();
-  const shelf = await homeShelf();
+  // El catálogo y los precios, a la par. Los precios salen de la vitrina (con su memoria), nunca de la oferta fresca de `/planes`.
+  const [shelf, showcase] = await Promise.all([homeShelf(), planShowcase()]);
+  const plans = showcaseView(showcase, plansLegalHref);
   const ready = shelf.kind === "ready" ? shelf.shelf : null;
   const open = ready?.open ?? null;
   const openHref = open === null ? null : coursePath(open.slug);
@@ -89,7 +114,9 @@ export default async function LandingPage() {
               <p className="text-body-l text-text">{text.hero.lead}</p>
             </div>
             <div className="flex w-full flex-col gap-4 sm:w-auto sm:flex-row sm:items-center sm:gap-6">
-              <Button href={ROUTES.signUp}>{text.hero.signUp}</Button>
+              {/* Con planes a la venta, «Suscribirme» a los planes (PA-01 del 03; decisión de Sergio del 2026-11-12). Sin venta
+                  llevaría a una página que no vende: sigue «Crear cuenta». */}
+              {plans.kind === "ready" ? <Button href={ROUTES.plans}>{text.hero.subscribe}</Button> : <Button href={ROUTES.signUp}>{text.hero.signUp}</Button>}
               {openHref !== null && (
                 <TextLink href={openHref} className="inline-flex min-h-touch items-center">
                   {text.hero.openCourse}
@@ -164,6 +191,25 @@ export default async function LandingPage() {
               ))}
             </ol>
           </section>
+
+          {plans.kind !== "hidden" && (
+            <section aria-labelledby={PLANS_ID} className="flex flex-col gap-6 px-4 sm:px-8">
+              <h2 id={PLANS_ID} className="text-h2">
+                {text.plans.title}
+              </h2>
+              {plans.kind === "ready" && (
+                <ul className="grid gap-4 sm:grid-cols-2">
+                  {plans.cards.map(planCard)}
+                </ul>
+              )}
+              <PlanIncludes id="portada-planes-incluye" />
+              <div>
+                <Button href={ROUTES.plans} variant="secondary">
+                  {text.plans.seeAll}
+                </Button>
+              </div>
+            </section>
+          )}
         </div>
       </main>
       <PublicFooter />

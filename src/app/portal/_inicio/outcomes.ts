@@ -32,6 +32,8 @@ export interface FirstStep {
   href: string | null;
   /** «Listo» o «Pendiente»; nulo si no se supo. */
   state: string | null;
+  /** El tono de su etiqueta, como valor: la pantalla no lo deduce del texto. Nulo junto con `state`. */
+  tone: "good" | "attention" | null;
 }
 
 export interface CourseRowView {
@@ -85,8 +87,9 @@ export function firstSteps(taxData: TaxDataFacts | null, readOnly: boolean): Fir
       label: text.firstTime.taxData,
       href: taxDone || taxData?.canSave === false ? null : ROUTES.portalTaxData,
       state: taxData === null ? null : taxDone ? text.firstTime.done : text.firstTime.pending,
+      tone: taxData === null ? null : taxDone ? "good" : "attention",
     },
-    { key: "primer-curso", label: text.firstTime.course, href: readOnly ? null : ROUTES.portalCourses, state: text.firstTime.pending },
+    { key: "primer-curso", label: text.firstTime.course, href: readOnly ? null : ROUTES.portalCourses, state: text.firstTime.pending, tone: "attention" },
   ];
 }
 

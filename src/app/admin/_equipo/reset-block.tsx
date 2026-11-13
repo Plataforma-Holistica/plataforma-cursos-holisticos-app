@@ -137,12 +137,9 @@ export function ResetBlock({ options, canChange, state, codeHidden, action, pend
               box={answer}
             />
           ) : (
-            <ul className="flex flex-col gap-3">
+            <ul className="surface-raised divide-y divide-border">
               {options.map((option) => (
-                <li
-                  key={option.id}
-                  className="flex flex-col gap-3 rounded-md border border-border p-4 sm:flex-row sm:items-center sm:justify-between"
-                >
+                <li key={option.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
                   <p className="text-body font-semibold break-all">{option.email}</p>
                   <RowAction button={option.choose} pending={pending} />
                 </li>

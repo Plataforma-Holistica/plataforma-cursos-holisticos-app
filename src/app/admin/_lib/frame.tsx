@@ -8,7 +8,8 @@ import type { Capability } from "@/services/account/team";
 // El marco de administración (diseño, `SideNav`; T-614, parte 6): el logotipo y el menú agrupado por
 // capacidad, solo con los grupos de quien entra (diseño §6.4: el menú solo muestra lo que la persona
 // puede abrir). Es una comodidad, como los enlaces que reemplaza: quién entra a cada sección lo decide
-// su guarda. Lo pintan el inicio y el comodín, después de la guarda; cada sección trae su `<main>`.
+// su guarda. Lo pintan el inicio y el comodín, después de la guarda; el `<main>` no va aquí ni en cada
+// sección: lo trae `AdminMain` (`shell.tsx`), que toda pantalla pinta adentro (T-616, solicitud 6).
 //
 // Moderación y soporte todavía no tienen pantallas: sus grupos llegan con ellas. A quien también es maestro,
 // «Mi portal» arriba, junto a «Ir a mi inicio» (T-616, solicitud 2).
@@ -74,8 +75,12 @@ export function AdminFrame({
   children: ReactNode;
 }) {
   return (
-    <SideFrame home={ROUTES.admin} groups={adminMenu(capabilities)} current={adminEntryOf(path)} text={text.nav} others={portal ? PORTAL : []}>
-      {children}
-    </SideFrame>
+    // El menú como segundo plano (`side-plane`, T-616, solicitud 6): el envoltorio le pone la superficie y los
+    // antetítulos al `<nav>` de `SideFrame`, por sus marcadores (`data-side-nav`, `data-side-group`).
+    <div className="side-plane">
+      <SideFrame home={ROUTES.admin} groups={adminMenu(capabilities)} current={adminEntryOf(path)} text={text.nav} others={portal ? PORTAL : []}>
+        {children}
+      </SideFrame>
+    </div>
   );
 }

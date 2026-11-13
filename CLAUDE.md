@@ -964,7 +964,7 @@ que no se ve leyendo un solo archivo:
   contra lo más claro de la foto con su velo. Usa `tests/ui/landing-page.test.tsx` y `tests/e2e/portada.spec.ts` (con el catálogo vacío de la corrida de siempre; exige AVIF y el tope de
   200 KB en el teléfono). Decisiones mías sin confirmar: la muestra son los cursos más nuevos, sin «Ver todo» (explorar pide sesión); el botón de la barra es secundario; en el teléfono la
   barra no lleva «Entrar» (va en el encabezado y en el pie); «Cómo funciona» sin constancias (T-504) ni la cifra de la lección; los textos de la portada. De la revisión del diff: ningún
-  texto habla de precio ni de suscripción (una prueba lo exige), la barra usa `z-(--z-sticky)`, la foto, el velo y el texto se apilan por su orden, sin capas negativas, y los enlaces
+  texto habla de precio ni de suscripción (una prueba lo exige; cambió con T-616, la 4b: ver su viñeta), la barra usa `z-(--z-sticky)`, la foto, el velo y el texto se apilan por su orden, sin capas negativas, y los enlaces
   sueltos de la barra y del pie miden `min-h-touch`. Para el A: nada que le toque.
 - **Lo que T-614 suma al carril B** (tercera parte, el acceso a la cuenta, sin migración; diseño §3.12; decisiones de Sergio del 2026-11-05: franja corta en el teléfono, y PA-12 y
   PA-15 con el logotipo y sin foto). Un marco, `src/app/(cuenta)/_lib/access-frame.tsx` (`AccessFrame`): en computadora la foto de acceso (las ondas) en media pantalla con el
@@ -1287,6 +1287,64 @@ que no se ve leyendo un solo archivo:
   solo dentro del menú, arriba); «Ir a mi inicio» conserva su texto; el portal no ofrece «Administración» en su
   menú lateral (no lo pidió nadie, y cada pantalla del portal leería al equipo). Para el A: `AdminFrame` pide `portal`, y una pantalla del
   alumno nueva pinta `StudentNav` y entra a la lista de `screens.test.ts`.
+- **Lo que T-616 suma (solicitud 6, la administración)** (sin migración; solo lo que se pinta: ninguna guarda, acción, consulta ni
+  texto cambió). **Toda pantalla de administración pinta `AdminMain`** (`src/app/admin/_lib/shell.tsx`), que trae el `<main>`, la
+  cabecera compacta (la filigrana y el resplandor, la capacidad de la sección de antetítulo con `area`, el título en `text-h1` y no en
+  el `text-display-l` de `PageHeader`, y `above`, `badge`, `lead` y `header` para «Volver a…», el estado y lo demás) y el cuerpo.
+  **El ancho es uno solo:** el token `--container-admin` (`max-w-admin`, 72rem), con los mismos márgenes en la cabecera y el cuerpo;
+  las tablas lo usan entero y lo angosto se limita adentro, a la izquierda (`measure="reading"`, o `max-w-reading` en un bloque de una
+  pantalla ancha, como «Tu código»). Una sección nueva no pone su propio `<main>` ni su `max-w-*`. **Las piezas:** una ficha o un
+  formulario, `surface-raised p-4 sm:p-5`; una lista de renglones, `surface-raised divide-y divide-border` con `p-4 sm:px-5` en cada
+  uno; ninguna caja `border border-border`. **Los títulos:** los `<h2>` en `text-h3` y los `<h3>` en `text-body-l font-semibold` (el
+  `text-h2` nuevo, de 28 px, queda grande para una herramienta densa); en la cola de revisión el maestro va de antetítulo. Los vacíos
+  de una lista que no es tabla llevan `FlowerState` (alertas, la cola de revisión, el inicio sin tarjetas); una tabla vacía lo sigue
+  diciendo adentro. **El menú lateral** se viste desde afuera: `AdminFrame` envuelve a `SideFrame` en `side-plane` (`theme.css`), que
+  alcanza al menú por los marcadores que pone `side-nav.tsx` (`data-side-frame` en el marco, `data-side-nav` en el `<nav>` y
+  `data-side-group` en cada título de grupo, en la columna y en la hoja del teléfono), no por su lugar en el armazón
+  (`tests/ui/side-frame.test.tsx` los exige), y el portal no la lleva todavía. `area` y `measure` entraron a `NON_TEXT_ATTRIBUTES` del lint. En maestros la
+  tabla va justo bajo «Todos» (su `caption` ya no se ve) e invitar va después. En las tablas que se desplazan (el reparto del
+  cierre y las liquidaciones) el nombre del maestro lleva `min-w-32`: con el ancho único se partía palabra por palabra. Decisiones mías sin confirmar: el ancho de 72rem; el contenido angosto a la
+  izquierda y no centrado; la capacidad como antetítulo; invitar después de la lista; los `<h2>` en `text-h3`; las capacidades del
+  inicio como etiquetas; el menú sobre `surface-1` con los grupos en oro apagado.
+- **Lo que T-616 suma (solicitud 5, el portal del maestro)** (sin migración; solo lo que se pinta: ninguna guarda, acción, consulta ni
+  texto cambió; va apilada sobre la 6, y donde esto choca con su viñeta, manda esto). **El armazón es uno para las dos herramientas:**
+  `ToolMain` (`src/app/_lib/tool-main.tsx`) es el de la solicitud 6, movido tal cual (el `<main>`, la cabecera con la filigrana, el
+  ancho `max-w-admin`, `above`, `badge`, `lead`, `header`, `measure`), con el antetítulo ya en palabras (`eyebrow`) y, para el título,
+  `titleId` (un bloque que se nombra con él) y `titleFocusable` (PA-45 le manda el foco). `AdminMain` quedó como envoltura delgada (pone
+  la capacidad de antetítulo), y el portal tiene la suya, `PortalMain` (`src/app/portal/_lib/shell.tsx`): `section` pone «Portal» de
+  antetítulo en las pantallas del menú; las que cuelgan de una llevan su «Volver a…» arriba y ninguno, o el suyo («Avance de
+  alumnos»). El marcador de la cabecera pasó de `data-admin-header` a `data-tool-header`. **`PortalFrame` ya no trae el `<main>`:** es
+  solo el menú y la franja de solo lectura, y toda pantalla del portal pinta `PortalMain` adentro, sin su propio `<main>` ni su
+  `max-w-*`. `ToolMain` no importa nada del servidor, porque lo pintan también pantallas de cliente: el editor lo pinta **dentro** de
+  sus proveedores (`UnsavedProvider`, `VideoUploadsProvider`), porque «Guardado a las…» de la cabecera lee de ellos. En las pantallas
+  con un bloque con ancla (`bloque-curso-nuevo`, `bloque-curso-borrar`, `bloque-version-descartar`, `bloque-enviar`,
+  `bloque-curso-publicado`) el `<h1>` subió a la cabecera y el bloque lo sigue nombrando por su `id`; el formulario de «Editar» de un
+  curso publicado se quedó dentro de su bloque. **El menú** lleva `side-plane` también en el portal, y la utilidad pinta además la
+  columna a todo el alto del envoltorio (un degradado con la misma superficie y la misma raya, desde `lg`): el `<nav>` ya era
+  `sticky` y medía la ventana, así que al desplazar no se cortaba, pero en una página más larga vista entera (una captura completa,
+  una impresión) su fondo terminaba a la altura de la ventana. El degradado va en el marco (`data-side-frame`), con el ancho `--spacing-sidenav` y el corte `lg` de
+  `side-nav.tsx`. **Las piezas** son las de la 6
+  (`surface-raised p-4 sm:p-5`, listas `surface-raised divide-y divide-border`, `<h2>` en `text-h3`, `<h3>` en `text-body-l
+  font-semibold`): los avisos de una pantalla van juntos arriba (`flex flex-col gap-3 empty:hidden`, que sin avisos no ocupa lugar);
+  «Para empezar» es una ficha con el número en oro apagado (`marker:`, no un número escrito: la prueba lee el texto del paso) y el
+  estado como `StatusBadge`; los vacíos llevan `FlowerState` (sin cursos, con su botón; el panel sin cursos publicados, con su enlace;
+  pagos, lo aceptado y los comentarios); en el teléfono las tarjetas de «Por curso» y de pagos son una sola pieza con filetes; los
+  importes de la liquidación van en una ficha. **En el editor solo cambiaron clases** (y la barra, que es la cabecera): los grupos, los
+  recursos y el video son `surface-raised`; el módulo también, y el elegido se marca con `outline` del acento, porque el borde de
+  `surface-raised` es una sombra; los antetítulos («Módulo 1», «Módulo 1 · Lección 1») en `eyebrow` con el oro apagado. No se tocó
+  ningún elemento, manejador ni `data-*` del arrastre, de la subida, del aviso al salir ni de los formularios. En datos fiscales los
+  formularios van envueltos en una ficha desde la sección (`_fiscal/section.tsx`), sin tocar `screen.tsx`. La invitación y el aviso
+  (sin menú) solo cambiaron sus cajas de texto por fichas. `titleId` entró a `NON_TEXT_ATTRIBUTES` del lint. **El antetítulo de cada
+  pantalla es texto nuevo a la vista aunque el catálogo no cambió** (las palabras ya existían: «Portal», la capacidad), y la
+  administración y el portal van ahora en una sola solicitud (la 151). **Un solo botón principal en el editor:** «Guardar»; «Enviar a
+  revisión» y «Agregar módulo» son `secondary` (`Button` no tiene una secundaria fuerte). El tono de la etiqueta de «Para empezar»
+  viaja como valor (`FirstStep.tone`), no se deduce del texto. Usa `tests/ui/tool-main.test.tsx`; de las aserciones existentes solo
+  cambiaron las de `firstSteps` en `_inicio/outcomes.test.ts`, que ahora esperan el tono. Sin capturas de «Para empezar», de la lista sin cursos,
+  de comentarios con hilos, del formulario de datos fiscales (los comentarios están cerrados y en local faltan `PII_ENCRYPTION_KEYS` y
+  `PII_ENCRYPTION_ACTIVE_VERSION`), ni del maestro suspendido. Decisiones mías sin confirmar:
+  «Portal» de antetítulo; generalizar el armazón en vez de duplicarlo; el ancho de 72rem también en el editor (antes 90rem); «Nuevo
+  curso» bajo el título y no en la otra orilla; los filtros de comentarios en una ficha; el estado de «Para empezar» como etiqueta
+  («Listo» en verde, «Pendiente» en atención); el video de la lección en su ficha.
 - **Lo que T-616 suma al carril B** (la 4a, «Planes» en la barra pública y el logotipo en toda página, sin migración; pedidos de
   Sergio del 2026-11-11 viendo la aplicación sin sesión). `PublicHeader` lleva «Planes» entre el logotipo y «Entrar», marcado en `/planes`
   (`onPlans`, que también pasa `PublicFooter`; `TextLink` ganó `current`, que pone `aria-current` y lo distingue a la vista: color del
@@ -1303,6 +1361,26 @@ que no se ve leyendo un solo archivo:
   carril A del 2026-11-11), sin constancias hasta T-504. El pie se llama «Enlaces del sitio». Cambió por el requisito la prueba de la portada
   que prohibía «planes» en todo el documento. Decisiones mías sin confirmar: «Planes» en el pie en el teléfono, los nombres partidos, la flor
   de 64 y 80 px, y solo el logotipo en las pantallas sueltas. Para el A: nada que le toque.
+- **Lo que T-616 suma al carril B** (la 4b, los precios en la portada, sin migración; zona delicada, cobros solo de lectura;
+  decisiones de Sergio del 2026-11-12 por el carril A, con la revisión independiente del diseño). **La portada no lee la oferta
+  fresca:** lee la vitrina, `planShowcase` (`src/services/billing/showcase.ts`, pura, y su armado `showcase-service.ts`), que recuerda
+  lo leído 60 s y el «no se supo» 15 s (decisión del carril A sin confirmar), comparte la lectura en curso con un tope de 3 s
+  (`SHOWCASE_READ_TIMEOUT_MS`: sin él, un socket mudo colgaría la portada en cada visita; lo que llegue tarde se descarta), nunca
+  rechaza y reporta una vez por lectura fallida (`plans_showcase_unavailable`). Un total que no es un entero positivo no dice su
+  equivalente. Contesta solo el plan, su total y la versión del texto del cobro recurrente.
+  Cada instancia guarda su copia: al entrar un precio programado, la portada puede mostrar el anterior hasta un minuto, y su enlace no
+  lleva el monto. `/planes`, PA-32 y la salida a pagar siguen con `planOffer`, fresco: si leyeran de la memoria, `changed` y
+  `refresh()` harían un ciclo. `tests/architecture/billing.test.ts` lo exige: la vitrina solo en su servicio y en la portada, nada de
+  `/planes`, `/suscripcion` ni una acción la nombra, la portada no nombra `planOffer`, y ningún texto de `src/messages/` escribe una
+  cifra de precio. **El texto de cada tarjeta es uno solo**, `planCardText` (`src/app/planes/view.ts`), que usan `/planes` y la portada;
+  `showcaseView` aplica el mismo criterio de «a la venta» que `plansView` (planes, texto del cobro recurrente y su página, por
+  `plansLegalHref` de `legal-href.ts`). **El equivalente mensual del anual se redondea hacia arriba, al centavo** (`monthlyEquivalent`,
+  decisión de Sergio: nunca anunciar menos), también en `/planes`. En la portada, con venta, el botón del encabezado dice «Suscribirme»
+  hacia `/planes` (si no, sigue «Crear cuenta»), y la sección de los planes va después de «Cómo funciona», con `PlanIncludes` y «Ver
+  planes»; sin venta no aparece, y si no se supo va sin cifras. La portada lee el catálogo y la vitrina a la par. Cambiaron por el
+  requisito el redondeo en `outcomes.test.ts` y `view.test.ts`, el botón del encabezado en la portada (pantalla y extremo a extremo) y la
+  prueba que prohibía cifras en ella. Decisión mía sin confirmar: sin venta, el encabezado sigue con «Crear cuenta». Para el A: la vitrina
+  vive en `src/services/billing/`, con dueño.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

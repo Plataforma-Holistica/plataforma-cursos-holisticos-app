@@ -105,3 +105,32 @@ describe("los avisos de Stripe", () => {
     }
   });
 });
+
+// Los precios de la portada (T-616, solicitud 4b): una memoria de un minuto, solo para la portada. Lo que acepta la persona (PA-04 y la
+// salida a pagar) se lee fresco: si `/planes` leyera de la memoria, un precio que cambió daría `changed` y la pantalla volvería a
+// mostrar el de antes.
+describe("los precios de la portada", () => {
+  it("la vitrina se nombra solo en su servicio y en la portada", () => {
+    expect(naming(/\bplanShowcase\b/)).toEqual(["src/app/page.tsx", "src/services/billing/showcase-service.ts", "src/services/billing/showcase.ts"]);
+    expect(naming(/\bcreatePlanShowcase\b/)).toEqual(["src/services/billing/showcase-service.ts", "src/services/billing/showcase.ts"]);
+  });
+
+  it("ni los planes, ni la confirmación, ni ninguna acción la tocan; y la portada no lee la oferta fresca", () => {
+    const showcase = /showcase-service|\bplanShowcase\b/;
+    const touching = sources.filter(({ file, text }) => (file.startsWith("src/app/planes/") || file.startsWith("src/app/suscripcion/") || /\/actions\.tsx?$/.test(file)) && showcase.test(text));
+    expect(touching.map(({ file }) => file)).toEqual([]);
+    expect(readFileSync(join(ROOT, "src/app/page.tsx"), "utf8")).not.toMatch(/\bplanOffer\b|checkout-service/);
+  });
+
+  it("la vitrina no sabe de Stripe ni del modo de prueba del cobro", () => {
+    for (const file of ["src/services/billing/showcase.ts", "src/services/billing/showcase-service.ts"]) {
+      expect(readFileSync(join(ROOT, file), "utf8"), file).not.toMatch(/BILLING_CHECKOUT|STRIPE_|adapters\/stripe/);
+    }
+  });
+
+  it("ningún texto escribe una cifra de precio: las pone la base", () => {
+    const messages = filesUnder("src/messages").filter((file) => /\.ts$/.test(file) && !/\.test\.ts$/.test(file));
+    const priced = messages.filter((file) => /\$\s?\d/.test(readFileSync(join(ROOT, file), "utf8")));
+    expect(priced).toEqual([]);
+  });
+});

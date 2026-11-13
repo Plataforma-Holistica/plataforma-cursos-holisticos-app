@@ -6,16 +6,16 @@ import { admin } from "@/messages/es/admin";
 import { periodPath, ROUTES } from "@/services/account/navigation";
 import { BackLink } from "@/ui/back-link";
 import { Button } from "@/ui/button";
-import { SPACE } from "@/ui/cx";
+import { cx, SPACE } from "@/ui/cx";
 import { DataTable } from "@/ui/data-table";
 import { InlineAlert } from "@/ui/inline-alert";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { StatTile } from "@/ui/stat-tile";
 import { StatusBadge } from "@/ui/status-badge";
 import { TextLink } from "@/ui/text-link";
 
 import { BlockResult, useAnswerFocus } from "../_lib/answer";
 import { CodeBlock } from "../_lib/code-block";
+import { AdminMain } from "../_lib/shell";
 import { panelAction, periodCodeAction } from "./actions";
 import { FAILURES, toneOf } from "./failures";
 import { PANEL_ANCHORS, type CodeState, type PanelState } from "./outcomes";
@@ -74,22 +74,25 @@ export function PeriodScreen({ view, done = false }: PeriodScreenProps) {
   const showDone = done && panel.kind === "idle" && !panelPending;
 
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-10 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-3">
-        <BackLink href={ROUTES.periods}>{text.backToPeriods}</BackLink>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-h1">{view.name}</h1>
-          <StatusBadge tone={view.tone}>{view.status}</StatusBadge>
-        </div>
-        <ol aria-label={text.steps} className="flex flex-wrap gap-2 text-body-s text-text-2">
+    <AdminMain
+      area="finance"
+      title={view.name}
+      above={<BackLink href={ROUTES.periods}>{text.backToPeriods}</BackLink>}
+      badge={<StatusBadge tone={view.tone}>{view.status}</StatusBadge>}
+      header={
+        <ol aria-label={text.steps} className="flex flex-wrap gap-2 pt-1 text-body-s text-text-2">
           {view.steps.map((step) => (
-            <li key={step.label} aria-current={step.current ? "step" : undefined} className={step.current ? "font-semibold text-text" : undefined}>
+            <li
+              key={step.label}
+              aria-current={step.current ? "step" : undefined}
+              className={cx("rounded-md px-2 py-0.5", step.current && "bg-surface-2 font-semibold text-text")}
+            >
               {step.label}
             </li>
           ))}
         </ol>
-      </div>
-
+      }
+    >
       {!view.canChange && !view.readOnly && (
         <CodeBlock
           blockId={CODE_BLOCK_ID}
@@ -112,7 +115,7 @@ export function PeriodScreen({ view, done = false }: PeriodScreenProps) {
       )}
 
       <section aria-labelledby="periodo-cifras-titulo" className="flex flex-col gap-4">
-        <h2 id="periodo-cifras-titulo" className="text-h2">
+        <h2 id="periodo-cifras-titulo" className="text-h3">
           {text.figuresTitle}
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -124,7 +127,7 @@ export function PeriodScreen({ view, done = false }: PeriodScreenProps) {
       </section>
 
       <section aria-labelledby="periodo-alertas-titulo" className="flex flex-col gap-4">
-        <h2 id="periodo-alertas-titulo" className="text-h2">
+        <h2 id="periodo-alertas-titulo" className="text-h3">
           {text.alertsTitle}
         </h2>
         {view.alerts.kind === "unavailable" ? (
@@ -156,7 +159,7 @@ export function PeriodScreen({ view, done = false }: PeriodScreenProps) {
       <ReconcileBlock periodId={view.periodId} view={view.reconciliation} />
 
       <section ref={block} id={ROLLUP_BLOCK_ID} aria-labelledby={ROLLUP_HEADING_ID} tabIndex={-1} className="flex flex-col gap-4 outline-none">
-        <h2 id={ROLLUP_HEADING_ID} className="text-h2">
+        <h2 id={ROLLUP_HEADING_ID} className="text-h3">
           {text.rollupTitle}
         </h2>
         <p>{view.rollup.last}</p>
@@ -202,7 +205,7 @@ export function PeriodScreen({ view, done = false }: PeriodScreenProps) {
       <p className="text-body-s">
         <TextLink href={ROUTES.admin}>{text.backToAdmin}</TextLink>
       </p>
-    </main>
+    </AdminMain>
   );
 }
 

@@ -222,7 +222,7 @@ export function ListBlock({ list, ids, view, canChange, state, action, pending }
         {view.rows.length === 0 ? (
           <p className="text-body-s text-text-2">{words.empty}</p>
         ) : (
-          <ol className="flex flex-col gap-2">
+          <ol className="surface-raised divide-y divide-border">
             {view.rows.map((row) => (
               <Row
                 key={row.id}
@@ -266,7 +266,7 @@ function Row({ row, inactiveLabel, offered, renaming, renameFieldId, renameError
   ];
 
   return (
-    <li className={`flex flex-col gap-3 rounded-md border border-border p-4 ${row.active ? "" : "opacity-70"}`}>
+    <li className={`flex flex-col gap-3 p-4 sm:px-5 ${row.active ? "" : "opacity-70"}`}>
       <div className="flex flex-wrap items-center gap-3">
         {toneClass !== undefined && <span aria-hidden="true" className={`size-5 shrink-0 rounded-sm ${toneClass}`} />}
         <p className="min-w-0 text-body font-semibold break-words">{row.name}</p>

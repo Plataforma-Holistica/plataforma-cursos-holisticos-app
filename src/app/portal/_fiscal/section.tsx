@@ -8,6 +8,7 @@ import { InlineAlert } from "@/ui/inline-alert";
 import { TextLink } from "@/ui/text-link";
 
 import { PortalFrame } from "../_lib/frame";
+import { PortalMain } from "../_lib/shell";
 import { clabeWaitingText } from "./clabe-wait";
 import { TaxCapture, TaxReveal } from "./screen";
 
@@ -15,6 +16,7 @@ import { TaxCapture, TaxReveal } from "./screen";
 // si ya los capturó y cuándo. Abrirlos pide la contraseña, en el formulario. Un maestro suspendido los captura y los cambia, salvo con el fraude confirmado: lo dice la base (FL-31, A2).
 
 const text = messages.portal.taxData;
+const CARD = "surface-raised p-4 sm:p-5";
 
 export async function TaxDataSection({
   claims,
@@ -36,26 +38,29 @@ export async function TaxDataSection({
 
   return (
     <PortalFrame current={ROUTES.portalTaxData} readOnly={readOnly}>
-      <h1 className="text-h1">{text.title}</h1>
-      <p className="text-text-2">{text.who}</p>
-      {notice === "tax_data_saved" && !wantsChange && <InlineAlert tone="success">{text.saved}</InlineAlert>}
-      {notice === "tax_data_changed" && wantsChange && <InlineAlert tone="warning">{text.changedElsewhere}</InlineAlert>}
-      {notice === "tax_data_locked" && !canSave && <InlineAlert tone="warning">{text.locked}</InlineAlert>}
-      {readOnly && canSave && <p className="text-text-2">{text.stillEditable}</p>}
-      {state?.clabeWaitsUntil != null && <InlineAlert tone="warning">{clabeWaitingText(state.clabeWaitsUntil)}</InlineAlert>}
-      {state?.clabeNoticePending === true && <InlineAlert tone="warning">{text.clabeNoticePending}</InlineAlert>}
-      {state?.clabeRecapture === true && canSave && !wantsChange && (
-        <InlineAlert tone="warning">
-          {text.clabeRecapture} <TextLink href={`${ROUTES.portalTaxData}?cambiar=1`}>{text.clabeRecaptureLink}</TextLink>
-        </InlineAlert>
-      )}
-      {!ready && <InlineAlert tone="warning">{text.off}</InlineAlert>}
-      {ready && state === null && <InlineAlert tone="danger">{text.unavailable}</InlineAlert>}
-      {state !== null && state.version === 0 && (canSave ? <TaxCapture seen={0} changing={false} email={email} /> : <p className="text-text-2">{text.readOnlyEmpty}</p>)}
-      {state !== null && state.version > 0 && wantsChange && <TaxCapture seen={state.version} changing email={email} />}
-      {state !== null && state.version > 0 && !wantsChange && (
-        <TaxReveal canChange={canSave} />
-      )}
+      <PortalMain title={text.title} section measure="reading" lead={<p>{text.who}</p>}>
+        <div className="flex flex-col gap-3 empty:hidden">
+          {notice === "tax_data_saved" && !wantsChange && <InlineAlert tone="success">{text.saved}</InlineAlert>}
+          {notice === "tax_data_changed" && wantsChange && <InlineAlert tone="warning">{text.changedElsewhere}</InlineAlert>}
+          {notice === "tax_data_locked" && !canSave && <InlineAlert tone="warning">{text.locked}</InlineAlert>}
+          {readOnly && canSave && <p className="text-text-2">{text.stillEditable}</p>}
+          {state?.clabeWaitsUntil != null && <InlineAlert tone="warning">{clabeWaitingText(state.clabeWaitsUntil)}</InlineAlert>}
+          {state?.clabeNoticePending === true && <InlineAlert tone="warning">{text.clabeNoticePending}</InlineAlert>}
+          {state?.clabeRecapture === true && canSave && !wantsChange && (
+            <InlineAlert tone="warning">
+              {text.clabeRecapture} <TextLink href={`${ROUTES.portalTaxData}?cambiar=1`}>{text.clabeRecaptureLink}</TextLink>
+            </InlineAlert>
+          )}
+          {!ready && <InlineAlert tone="warning">{text.off}</InlineAlert>}
+          {ready && state === null && <InlineAlert tone="danger">{text.unavailable}</InlineAlert>}
+        </div>
+        {/* Cada bloque en su ficha: la envoltura es solo de presentación, y los formularios quedan como estaban. */}
+        {state !== null && state.version === 0 && (canSave ? <div className={CARD}><TaxCapture seen={0} changing={false} email={email} /></div> : <p className="text-text-2">{text.readOnlyEmpty}</p>)}
+        {state !== null && state.version > 0 && wantsChange && <div className={CARD}><TaxCapture seen={state.version} changing email={email} /></div>}
+        {state !== null && state.version > 0 && !wantsChange && (
+          <div className={CARD}><TaxReveal canChange={canSave} /></div>
+        )}
+      </PortalMain>
     </PortalFrame>
   );
 }

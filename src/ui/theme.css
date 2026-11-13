@@ -710,3 +710,40 @@
 input[type="search"]::-webkit-search-cancel-button {
   appearance: none;
 }
+
+/* 6. La administración (T-616, solicitud 6). */
+@theme inline {
+  /* El ancho de contenido de administración, uno solo para todas sus secciones: la cabecera, las tablas y los
+     bloques arrancan en la misma orilla. Lo angosto (un formulario, un texto) se limita adentro, a la izquierda. */
+  --container-admin: 72rem;  /* 1152 px */
+}
+/* El menú lateral como segundo plano: sobre la superficie, con su borde de luz en vez de la raya, y los nombres de
+   los grupos como antetítulos, en el oro apagado. Va en el envoltorio de `SideFrame` y alcanza al menú por los
+   marcadores que pone `side-nav.tsx` (`data-side-frame` en el marco, `data-side-nav` en el `<nav>` y
+   `data-side-group` en cada título de grupo), no por su lugar en el armazón: `tests/ui/side-frame.test.tsx` los exige. */
+@utility side-plane {
+  & [data-side-nav] {
+    background-color: var(--surface-1);
+    border-color: var(--edge-ring);
+    box-shadow: inset 0 1px 0 var(--edge-light);
+  }
+  & [data-side-group] {
+    color: var(--accent-muted);
+  }
+  /* La columna del menú llega hasta abajo (solicitud 5). El `<nav>` mide la ventana y se queda pegado al desplazar,
+     pero en una página más larga su fondo terminaba a la altura de la ventana cada vez que la página se ve entera
+     (una captura completa, una impresión, el rebote al final): debajo se veía el fondo de la página. El envoltorio
+     pinta la misma superficie y la misma raya a todo su alto, detrás del menú. Desde `lg`, donde el menú es columna
+     (`lg:w-sidenav` en `side-nav.tsx`: el corte y el ancho de aquí son los de allá). */
+  @media (width >= 64rem) {
+    & > [data-side-frame] {
+      background-image: linear-gradient(
+        to right,
+        var(--surface-1) calc(var(--spacing-sidenav) - 1px),
+        var(--edge-ring) calc(var(--spacing-sidenav) - 1px),
+        var(--edge-ring) var(--spacing-sidenav),
+        transparent var(--spacing-sidenav)
+      );
+    }
+  }
+}
