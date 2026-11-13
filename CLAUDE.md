@@ -1435,11 +1435,14 @@ que no se ve leyendo un solo archivo:
   hace fallar. **El oro en Mux** (`@utility player-mux`): `--media-accent-color: var(--accent)` en el cuerpo de la utilidad; el icono en
   `--on-accent` solo donde el oro es fondo (`::part(bottom button):hover` y `::part(pre-play):hover`; nunca `::part(button)` a secas, que
   toma el central del teléfono, transparente al pasar, ni `--media-text-color` en un botón, que se hereda a su tooltip); el «1x» y el
-  tiempo al pasar con `color`; lo cargado (0.25) y la pista (0.2) translúcidos, medidos juntos porque lo cargado va dentro de la pista; los
+  tiempo al pasar con `color`, las cuatro dentro de `@media (hover: hover)` (en lo táctil `:hover` se queda puesto); lo cargado (0.25) y la pista (0.2) translúcidos, medidos juntos porque lo cargado va dentro de la pista; los
   menús en `surface-2` y lo elegido de la velocidad en `surface-3`. `tests/design/theme.test.ts` lee cada regla y `contrast.test.ts` mide
   el avance contra lo cargado y la pista sobre el negro. Límites: sobre un cuadro claro del video lo translúcido baja; la burbuja de la vista
-  previa del tiempo sigue blanca; el botón «activar sonido» no existe en Mux 3.14 (revisarlo al subir de versión); Safari se mira en el
-  iPhone. `tests/e2e/equipo/leccion.equipo.ts` comprueba a 320 px el botón de PA-33 entero, dentro de su lugar y sin nada encima.
+  previa del tiempo sigue blanca; el botón «activar sonido» no existe en Mux 3.14; Safari y el `:hover` táctil se miran en el iPhone.
+  **Al subir `@mux/mux-player-react`** se revisan en su tema (`base.mjs`) todas las partes y variables que usa `player-mux`
+  (`bottom`, `button`, `pre-play`, `playback-rate`, `time`, `display`, `range`, `menu`, `--media-accent-color`, `--media-icon-color`,
+  `--media-time-range-buffered-color`, `--media-range-track-background`, `--media-menu-*`): las pruebas fijan el texto de `theme.css`,
+  no que Mux siga llamándolas así. `tests/e2e/equipo/leccion.equipo.ts` comprueba a 320 px el botón de PA-33 entero, dentro de su lugar y sin nada encima.
   Cambió por el requisito el texto de `about` en las pruebas de la pantalla. Decisiones del carril A sin confirmar por Sergio: PA-33 crece
   en el teléfono y no se pega; «Sobre esta lección» sin el módulo; el reproductor en oro con los menús oscuros. Mías sin confirmar: lo
   cargado en 0.25 y la pista en 0.2; lo elegido de la velocidad en `surface-3`. Para el A: nada que le toque.
