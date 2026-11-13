@@ -157,7 +157,8 @@ export function AccountScreen({ name, email, sessions, secondFactor = false }: A
             <h2 id={EMAIL_TITLE_ID} className="text-h3">
               {text.emailTitle}
             </h2>
-            {email !== null && <p>{email}</p>}
+            {/* Sin espacios, un correo largo ensanchaba la página a 320 px: se parte donde haga falta (T-616, 3b-3). */}
+            {email !== null && <p className="wrap-anywhere">{email}</p>}
             <p className="text-body-s text-text-2">{text.emailNote}</p>
           </section>
           <PasswordBlock recoverOnly={secondFactor} state={password} action={passwordAction} pending={passwordPending} />

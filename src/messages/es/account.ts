@@ -273,7 +273,7 @@ export const account = defineMessages({
     pageTitle: "Cuenta",
     title: "Cuenta",
     // La entradilla de la cabecera (T-616, 3b-3): lo que hay en la pantalla.
-    lead: "Tu nombre, tu contraseña, dónde tienes la sesión abierta y lo que comentaste.",
+    lead: "Tu nombre, tu correo y tu contraseña, dónde tienes la sesión abierta y lo que comentaste.",
     nameTitle: "Nombre",
     save: "Guardar",
     saving: "Guardando…",

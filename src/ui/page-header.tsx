@@ -71,7 +71,7 @@ export function PageHeader({ title, titleRef, above, eyebrow, lead, photo, size 
           grande que se ve al llegar y arrancarlo invisible retrasaba su pintado (LCP) los 480 ms de la entrada. */}
       <div className={cx("relative mx-auto flex w-full max-w-page flex-col gap-3 px-4 sm:px-8", hero ? "pt-16 pb-8 sm:pt-24 sm:pb-16" : "pt-12 pb-10 sm:pt-24 sm:pb-14")}>
         {/* No se estira en la columna: el enlace mide su texto, no toda la fila. */}
-        {above !== undefined && <div className="self-start">{above}</div>}
+        {above !== undefined && above !== null && above !== false && <div className="self-start">{above}</div>}
         {eyebrow !== undefined && <p className="animate-enter eyebrow text-accent">{eyebrow}</p>}
         <h1
           ref={titleRef}
