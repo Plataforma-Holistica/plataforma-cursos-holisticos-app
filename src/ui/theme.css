@@ -625,6 +625,43 @@
   :where(.player-frame-filled) & {
     --fullscreen-button: none;
   }
+  /* El oro de la marca (T-616, 3b-2; decisión del carril A del 2026-11-12). Mux pinta con él la barra de avance, el fondo
+     del control al pasar el cursor, el botón central grande y lo de los menús. Sus controles viven en su sombra: lo que no
+     llega por la variable llega por las partes que exporta (`::part`), que ganan a sus reglas de dentro. */
+  --media-accent-color: var(--accent);
+  /* Donde el oro es fondo, el icono va en `on-accent` (11.44). Solo ahí: el central del teléfono es transparente al pasar,
+     y `::part(button)` a secas lo tomaría. Nunca `--media-text-color` en un botón: se hereda a su tooltip, que va sobre
+     casi negro. El «1x» de la velocidad y el tiempo pintan texto: su `color`, que el tooltip no hereda. */
+  &::part(bottom button):hover {
+    --media-icon-color: var(--on-accent);
+  }
+  &::part(pre-play):hover {
+    --media-icon-color: var(--on-accent);
+  }
+  &::part(playback-rate button):hover {
+    color: var(--on-accent);
+  }
+  &::part(time display):hover {
+    color: var(--on-accent);
+  }
+  /* Lo visto, en oro, contra lo cargado (blanco opaco en Mux: daba 1.55) y contra la pista: los dos translúcidos, para que
+     el avance se distinga de los dos (3:1 sobre el negro del reproductor; `contrast.test.ts`). */
+  &::part(time range) {
+    --media-time-range-buffered-color: rgb(255 255 255 / 0.4);
+    --media-range-track-background: rgb(255 255 255 / 0.2);
+  }
+  /* Los menús, oscuros: en Mux son blancos, y el oro de la palomita y del contorno daba 1.55 sobre el blanco. */
+  &::part(menu) {
+    --media-menu-background: var(--surface-2);
+    --media-text-color: var(--text);
+    --media-menu-item-hover-outline: var(--accent) solid 1px;
+    border-color: var(--border);
+  }
+  /* Lo elegido de la velocidad: Mux le fija el texto en blanco y el fondo en el acento. El fondo pasa a `surface-3`, y lo
+     marca su negrita. Va después de la de los menús: misma especificidad. */
+  &::part(menu playback-rate) {
+    --media-menu-item-checked-background: var(--surface-3);
+  }
 }
 /* La marca de agua: tenue, sin recibir el toque ni seleccionarse, y que deriva despacio hacia
    dentro del área segura. Con movimiento reducido, la regla de abajo le quita la deriva y el
