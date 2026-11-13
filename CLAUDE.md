@@ -981,7 +981,8 @@ que no se ve leyendo un solo archivo:
   `src/ui/photos/choice.ts`, puro: `practicePhoto(posición)` alterna las dos por el orden de la práctica en PA-67 (la misma práctica, siempre la misma), y `homeHeaderPhoto(fecha)` alterna
   por día de la Ciudad de México. Para eso `ShelfTeacher` trae `practicePosition`, y `TeacherCard` la pide. **Las prácticas lado a lado:** `layOutRows` (`src/app/_catalog/rows.ts`,
   puro) junta dos seguidas de a lo más `SHORT_ROW` (2) cursos, sin cambiar su orden, y `PracticeRows` las pinta, en el inicio y en explorar sin filtro; cada una sigue siendo su
-  carrusel. El saludo del inicio va sobre su franja (`data-home-header`). La barra del alumno lleva el `Wordmark` (`browse.nav.brand` se fue). **`PublicHeader` tiene dos variantes:**
+  carrusel (cambió con T-616, la 3a: el inicio ya no alterna fotos ni tiene filas por práctica, y `rows.ts` y `PracticeRows` se fueron; ver
+  su viñeta). El saludo del inicio va sobre su franja (`data-home-header`). La barra del alumno lleva el `Wordmark` (`browse.nav.brand` se fue). **`PublicHeader` tiene dos variantes:**
   `overPhoto` (la portada, transparente y fija al desplazar) y sólida (`sticky`), que es la de las fichas para el visitante; `PublicFooter` va ahí sin el deslinde
   (`withDisclaimer={false}`), porque la ficha del curso ya lo pinta al final. A quien no se sabe quién es, ni la barra del alumno ni la pública. Cambiaron por el requisito dos
   pruebas de las fichas: «sin sesión no hay barra» mira ahora que no esté la del alumno (también en `tests/e2e/equipo/catalogo.equipo.ts`, por la revisión del diff). El visitante
@@ -1381,6 +1382,32 @@ que no se ve leyendo un solo archivo:
   requisito el redondeo en `outcomes.test.ts` y `view.test.ts`, el botón del encabezado en la portada (pantalla y extremo a extremo) y la
   prueba que prohibía cifras en ella. Decisión mía sin confirmar: sin venta, el encabezado sigue con «Crear cuenta». Para el A: la vitrina
   vive en `src/services/billing/`, con dueño.
+- **Lo que T-616 suma al carril B** (la 3a, el alumno en el lenguaje del rediseño, sin migración; plan en
+  `~/.claude/plans/t616-sol3-plan.md`, sobre el prototipo de la dirección). **El inicio:** cabecera alta (`PageHeader`) con las estrellas fijas
+  (`HOME_HEADER_PHOTO`; ya no alterna con el faro, que pasó a Explorar como `explorar-faro.jpg`), la fecha de antetítulo en
+  `PRODUCT_TIME_ZONE` y «Entraste como…» bajo el saludo; el protagonista (`src/app/inicio/feature.tsx`): «Continuar viendo» o «Para
+  empezar» con la portada grande a 6 de 12 columnas (fuera del teclado: todo es un solo enlace, y su nombre termina con lo que dice su botón,
+  WCAG 2.5.3) y los demás en filas compactas, tres a la vista y el resto en un `<details>` cuya lista se nombra por su desplegable (un nombre
+  con el antetítulo haría que buscar «Continuar viendo» encontrara dos); las prácticas como fichas que llevan a explorar con su filtro (una fila que llega al tope del servicio, `ROW_LIMIT`, dice
+  «12 o más cursos»); «Por
+  maestro» sin caja, con retratos de 120 px. Ya no hay un carrusel por práctica: FL-10 alcanza la práctica por su ficha. **Explorar:** rejilla
+  de a lo más 5 columnas, buscador de `max-w-search` (720 px) con el envío dentro, fichas de práctica que son enlaces (la elegida viaja en un
+  campo oculto que va **después** del buscador: sin JavaScript, la dirección empieza por `q`) y maestro y nivel en selectores a la derecha. Con JavaScript, pulsar una ficha envía el formulario en ese momento con lo tecleado (sin él,
+  el enlace). Sin filtro, la rejilla se llama «Cursos por práctica» y, si alguna fila llegó al tope, lo dice debajo.
+  **Mi lista:** el marcador es un icono en la esquina de la tarjeta (`variant="icon"`), y su aviso de error se ancla a la franja de la esquina
+  (`CourseCard`, `left-2`) para caber en la tarjeta del teléfono; la lista vacía y el catálogo vacío, con `FlowerState`. **Las fichas de curso y
+  de maestro**, con la cabecera de la portada, la filigrana y el resplandor; el temario con la roseta por lección (`LessonRow rosette`).
+  `PaywallState` (`src/app/_catalog/paywall-state.tsx`) existe y lo pinta la lección en la 3b. En el teléfono la cabecera del inicio es más baja y la portada del
+  protagonista más corta, para que su botón quepa en 390×844 (FL-10 lo afirma con `toBeInViewport`); la portada lleva al centro reproducir o
+  la roseta. Los carriles que se deslizan llevan `-mt-3
+  pt-3` y `scroll-px-4`, como `Carousel`, para no recortar el anillo de foco, y lo que lleva `shadow-raised` y toma el foco suma `focus-visible:shadow-focus`.
+  Cambiaron en `src/ui/`, con props opcionales: `CourseArt` (`largeMotif`), `CourseCard` (la línea de datos sin la práctica, también en la
+  portada), `LessonRow` (`rosette`), `FlowerState` (`size="compact"`), `TeacherCard` redondo a 120 px, `PageHeader` alto, `buttonLook()` y el
+  token `--container-search`. Cambiaron por el requisito unas quince pruebas de pantalla del inicio y de Explorar, y en extremo a extremo FL-10
+  (la práctica por su ficha) y el nombre del protagonista en `leccion.equipo.ts`. Decisiones mías sin confirmar, además de las del prototipo: el
+  faro en Explorar; «Para empezar» también en filas; reproducir solo en «Continuar viendo»; selectores sin etiqueta visible; el marcador de
+  icono solo en Explorar. Revierten decisiones de Sergio del 2026-11-05 y del 2026-10-28 (la foto alternada, las prácticas lado a lado y
+  «Guardar» bajo la tarjeta), por la dirección del rediseño: las anota el carril A. Para el A: `CourseCard` cambió en la portada.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

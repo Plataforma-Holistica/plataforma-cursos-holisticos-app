@@ -167,6 +167,21 @@ describe("la tarjeta de curso como cartel (T-616)", () => {
     expect(label.parentElement?.textContent).toContain("Respiración");
   });
 
+  // La práctica ya va arriba en el cartel: la línea de datos no la repite (T-616, solicitud 3; nota del carril A).
+  it("la línea de datos lleva el nivel y las lecciones, sin repetir la práctica del cartel", () => {
+    const { container } = render(<CourseCard {...course} />);
+    const meta = [...container.querySelectorAll("a > span[aria-hidden='true'] span")].map((span) => span.textContent);
+    expect(meta).toContain("Inicial · 6 lecciones");
+    expect(meta.some((line) => line?.includes("Respiración"))).toBe(false);
+    expect(screen.getByText("Respiración")).toBeInTheDocument();
+  });
+
+  it("sin título, el motivo grande ocupa la portada entera", () => {
+    const { container } = render(<CourseArt practiceName={null} practiceKey={2} tone={3} seed="respirar" shape="wide" largeMotif />);
+    expect(container.querySelector("svg")).toHaveClass("inset-0", "h-full");
+    expect(container.querySelector("p")).toBeNull();
+  });
+
   it("la portada ancha es 16:9 y la vertical 4:5", () => {
     const { container: wide } = render(<CourseCard {...course} shape="wide" />);
     expect(wide.querySelector(".aspect-video")).not.toBeNull();
@@ -200,5 +215,14 @@ describe("el logotipo y los retratos (T-616)", () => {
     expect(ring).toHaveClass("rounded-full", "p-1");
     expect(ring?.className).not.toMatch(/ring-offset/);
     expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  // «Por maestro» del inicio, sin caja y en la rejilla, con retratos de 120 px (T-616, solicitud 3): un solo tamaño, sin escalón por ancho.
+  it("el retrato redondo mide 120 px en todo ancho, y su foto se pide a ese ancho", () => {
+    const { container } = render(<TeacherCard href="/maestros/ana" name="Ana" practices={["Yoga"]} tone={4} practicePosition={1} shape="round" />);
+    const portrait = container.querySelector(".ring-1 > span");
+    expect(portrait).toHaveClass("size-30");
+    expect(portrait?.className).not.toMatch(/sm:size-/);
+    expect(container.querySelector("img")).toHaveAttribute("sizes", "120px");
   });
 });

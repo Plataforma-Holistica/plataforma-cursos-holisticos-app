@@ -230,6 +230,26 @@ describe("LessonRow", () => {
     render(<LessonRow href="/cursos/x/lecciones/1" number={5} title="Acostado" duration="7 min" state="in_progress" current />);
     expect(screen.getByRole("link", { name: "Lección 5, Acostado, 7 min, reproduciendo" })).toHaveTextContent("7 min · Reproduciendo");
   });
+
+  // La ficha del curso marca el avance con la roseta de la flor de la vida (T-616, solicitud 3): en oro la terminada, en trazo
+  // la de a medias. Sin empezar y con candado siguen con su icono; el nombre no cambia.
+  it.each([
+    ["completed", "Lección 3, Cuatro tiempos, 6 min, terminada", "fill-accent-subtle"],
+    ["in_progress", "Lección 3, Cuatro tiempos, 6 min, a medias", "stroke-text-2"],
+  ] as const)("con la roseta, %s la lleva en su lugar y decorativa", async (state, name, tone) => {
+    const { container } = render(<LessonRow href="/cursos/x/lecciones/1" number={3} title="Cuatro tiempos" duration="6 min" state={state} rosette />);
+    const link = screen.getByRole("link", { name });
+    const rosette = link.querySelector("svg g");
+    expect(rosette).toHaveClass(tone);
+    expect(rosette?.closest("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it.each(["not_started", "locked"] as const)("con la roseta, %s sigue con su icono", (state) => {
+    const { container } = render(<LessonRow href="/cursos/x/lecciones/1" number={3} title="Cuatro tiempos" duration="6 min" state={state} rosette />);
+    expect(container.querySelector("svg g")).toBeNull();
+    expect(container.querySelector('svg[viewBox="0 0 24 24"]')).not.toBeNull();
+  });
 });
 
 describe("ProgressBar", () => {

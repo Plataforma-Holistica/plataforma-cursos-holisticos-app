@@ -97,6 +97,15 @@ interface AsLink extends CommonProps {
 
 export type ButtonProps = AsButton | AsLink;
 
+/**
+ * El aspecto del botón, sin el botón (T-616, solicitud 3): para la llamada a la acción que se ve dentro de algo que ya es
+ * un enlace (el protagonista del inicio), donde un botón o un enlace anidados no valen. Lo que lleva no es una parada del
+ * teclado ni tiene nombre propio: lo dice el enlace que lo contiene.
+ */
+export function buttonLook({ variant = "primary", size = "lg" }: { variant?: keyof typeof VARIANTS; size?: keyof typeof SIZES } = {}): string {
+  return cx(BASE, VARIANTS[variant], SIZES[size]);
+}
+
 export function Button(props: ButtonProps) {
   const reasonId = useId();
   const { variant = "primary", size = "lg", children, className } = props;

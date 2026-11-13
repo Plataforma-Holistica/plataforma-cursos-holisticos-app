@@ -14,6 +14,7 @@ import { teacherPage } from "@/services/browse/browse";
 import { CourseCard } from "@/ui/course-card";
 import { toneClasses } from "@/ui/course-cover";
 import { cx } from "@/ui/cx";
+import { Filigree } from "@/ui/flower";
 import { practicePhoto } from "@/ui/photos/choice";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 
@@ -49,25 +50,31 @@ export default async function TeacherRoute({ params }: { params: Promise<{ slug:
       {nav !== null && <StudentNav {...nav} />}
       {/* Al visitante, la barra y el pie del sitio público (T-614, parte 4). */}
       {viewer.kind === "visitor" && <PublicHeader />}
-      <main id={MAIN_CONTENT_ID} tabIndex={-1} className={cx("mx-auto flex max-w-page flex-col gap-12 px-4 pt-8 outline-none sm:px-8", viewer.kind === "student" ? "pb-24 sm:pb-16" : "pb-16")}>
-        <header className="grid gap-6 sm:grid-cols-12 sm:items-end sm:gap-10">
-          <div
-            aria-hidden="true"
-            className={cx(
-              "@container relative flex aspect-2/3 max-h-96 items-center justify-center overflow-hidden rounded-md bg-linear-to-t shadow-raised sm:col-span-4 lg:col-span-3",
-              toneClasses(teacher.tone),
-            )}
-          >
-            {photo === null ? (
-              <span className="font-display text-cover-initial text-text">{initial}</span>
-            ) : (
-              <Image src={photo} alt="" fill sizes="(min-width: 1024px) 336px, (min-width: 640px) 33vw, 100vw" className="object-cover" />
-            )}
-          </div>
-          <div className="flex flex-col gap-4 sm:col-span-8 lg:col-span-9">
-            <h1 className="text-display-l">{teacher.name}</h1>
-            {teacher.practices.length > 0 && <p className="text-label text-text-2 uppercase">{teacher.practices.join(" · ")}</p>}
-            {teacher.bio !== null && <p className="max-w-reading text-body-l text-text-2">{teacher.bio}</p>}
+      <main id={MAIN_CONTENT_ID} tabIndex={-1} className={cx("mx-auto flex max-w-page flex-col gap-12 px-4 outline-none sm:px-8", viewer.kind === "student" ? "pb-24 sm:pb-16" : "pb-16")}>
+        {/* T-616, solicitud 3 (el lenguaje del sistema visual; decisión mía sin confirmar): a todo lo ancho, con el resplandor y la
+            filigrana detrás (la foto ya va en el retrato), y sus prácticas de antetítulo, en oro pleno sobre el resplandor. */}
+        <header className="relative isolate -mx-4 overflow-hidden px-4 pt-8 pb-4 sm:-mx-8 sm:px-8 sm:pt-12">
+          <span aria-hidden="true" className="absolute inset-0 -z-10 glow-header" />
+          <Filigree className="absolute -top-40 -right-36 -z-10 size-112 sm:-top-56 sm:right-0 sm:size-160" />
+          <div className="grid gap-6 sm:grid-cols-12 sm:items-end sm:gap-10">
+            <div
+              aria-hidden="true"
+              className={cx(
+                "@container relative flex aspect-2/3 max-h-96 items-center justify-center overflow-hidden rounded-lg bg-linear-to-t edge-light shadow-raised sm:col-span-4 lg:col-span-3",
+                toneClasses(teacher.tone),
+              )}
+            >
+              {photo === null ? (
+                <span className="font-display text-cover-initial text-text">{initial}</span>
+              ) : (
+                <Image src={photo} alt="" fill sizes="(min-width: 1024px) 336px, (min-width: 640px) 33vw, 100vw" className="object-cover" />
+              )}
+            </div>
+            <div className="flex min-w-0 flex-col gap-4 sm:col-span-8 lg:col-span-9">
+              {teacher.practices.length > 0 && <p className="eyebrow text-accent">{teacher.practices.join(" · ")}</p>}
+              <h1 className="text-display-l wrap-break-word">{teacher.name}</h1>
+              {teacher.bio !== null && <p className="max-w-reading text-body-l text-text-2">{teacher.bio}</p>}
+            </div>
           </div>
         </header>
 
@@ -75,8 +82,9 @@ export default async function TeacherRoute({ params }: { params: Promise<{ slug:
           <h2 id="cursos-del-maestro" className="text-h2">
             {t(text.courses, { name: teacher.name })}
           </h2>
-          {/* Dos, tres y cuatro columnas: con la tarjeta vertical (T-616), a tres columnas los carteles medían más de 500 px de alto. */}
-          <ul className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-4">
+          {/* La rejilla de explorar: dos, tres y cinco columnas (T-616, solicitud 3); a tres en computadora, los carteles medían más
+              de 500 px de alto. */}
+          <ul className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-5">
             {courses.map((course) => {
               const href = coursePath(course.slug);
               if (href === null) return null;

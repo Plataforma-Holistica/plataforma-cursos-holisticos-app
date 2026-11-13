@@ -20,9 +20,10 @@ import { coursePage, courseStanding } from "@/services/browse/browse";
 import { lessonAccess } from "@/services/media/media";
 import { BackLink } from "@/ui/back-link";
 import { Button } from "@/ui/button";
-import { CourseCover } from "@/ui/course-cover";
+import { CourseArt } from "@/ui/course-cover";
 import { cx } from "@/ui/cx";
 import { Disclaimer } from "@/ui/disclaimer";
+import { Filigree } from "@/ui/flower";
 import { InlineAlert } from "@/ui/inline-alert";
 import { LessonRow } from "@/ui/lesson-row";
 import { ProgressBar } from "@/ui/progress-bar";
@@ -49,6 +50,12 @@ import { primaryAction, type PrimaryAction, type Viewer } from "./outcomes";
 // «Guardar en mi lista» (RF-311) va junto al botón principal, solo para el alumno, y solo si se
 // supo si ya lo tiene guardado (se lee con su avance). Al visitante no se le ofrece (decisión de
 // Sergio del 2026-10-28).
+//
+// T-616, solicitud 3 (el lenguaje del sistema visual; decisiones mías sin confirmar): la cabecera lleva la portada «arte» del
+// curso (la del cartel de su tarjeta, sembrada con el curso, con su motivo grande y sin título: el título es el `<h1>` de al
+// lado) y, detrás, el resplandor y la filigrana de la flor de la vida; la práctica y el nivel van de antetítulo, en oro pleno
+// porque van sobre el resplandor. El temario marca el avance de cada lección con la roseta (`rosette`), y cada
+// módulo, la ficha del maestro y los recursos van sobre una superficie elevada.
 
 const text = messages.browse.course;
 
@@ -113,25 +120,23 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className={cx("mx-auto flex max-w-page flex-col gap-10 px-4 pt-6 outline-none sm:px-8", who.kind === "student" ? "pb-24 sm:pb-16" : "pb-16")}>
         {who.kind === "student" && <BackLink href={ROUTES.home}>{text.back}</BackLink>}
 
-        <header className="grid gap-6 md:grid-cols-12 md:items-center md:gap-10">
-          <CourseCover
-            title={course.title}
-            teacherName={course.teacherName}
-            practiceName={course.practice?.name ?? null}
-            tone={course.practice?.tone ?? null}
-            className="rounded-md shadow-raised md:order-2 md:col-span-6"
-          />
-          <div className="flex flex-col gap-4 md:order-1 md:col-span-6">
-            {tags.length > 0 && (
-              <ul className="flex flex-wrap gap-2">
-                {tags.map((tag) => (
-                  <li key={tag} className="rounded-sm bg-surface-2 px-2 py-1 text-label text-text-2 uppercase">
-                    {tag}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <h1 className="text-display-l text-balance">{course.title}</h1>
+        {/* A todo lo ancho de la página (los márgenes negativos devuelven los de `<main>`), con lo que sobra recortado. */}
+        <header className="relative isolate -mx-4 overflow-hidden px-4 pt-4 pb-6 sm:-mx-8 sm:px-8 sm:pt-8 sm:pb-10">
+          <span aria-hidden="true" className="absolute inset-0 -z-10 glow-header" />
+          <Filigree className="absolute -top-40 -right-36 -z-10 size-112 sm:-top-56 sm:right-0 sm:size-160" />
+          <div className="grid gap-6 md:grid-cols-12 md:items-center md:gap-10">
+            <CourseArt
+              practiceName={course.practice?.name ?? null}
+              practiceKey={course.practice?.position ?? course.practice?.slug ?? null}
+              tone={course.practice?.tone ?? null}
+              seed={course.slug}
+              shape="wide"
+              largeMotif
+              className="rounded-lg edge-light shadow-raised md:order-2 md:col-span-6"
+            />
+            <div className="flex min-w-0 flex-col gap-4 md:order-1 md:col-span-6">
+              {tags.length > 0 && <p className="eyebrow text-accent">{tags.join(" · ")}</p>}
+              <h1 className="text-display-l text-balance wrap-break-word">{course.title}</h1>
             <p className="text-body-l text-text-2">
               {teacherHref === null ? course.teacherName : <TextLink href={teacherHref}>{course.teacherName}</TextLink>}
             </p>
@@ -164,6 +169,7 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
                 )}
               </div>
             )}
+            </div>
           </div>
         </header>
 
@@ -177,11 +183,12 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
                 {text.syllabus}
               </h2>
               {detail.modules.map((group, index) => (
-                <section key={group.id} aria-labelledby={`modulo-${group.id}`} className="flex flex-col gap-1">
-                  <h3 id={`modulo-${group.id}`} className="text-h3 text-text-2">
+                <section key={group.id} aria-labelledby={`modulo-${group.id}`} className="flex flex-col gap-2">
+                  <h3 id={`modulo-${group.id}`} className="eyebrow text-accent-muted">
                     {t(text.moduleTitle, { number: index + 1, title: group.title })}
                   </h3>
-                  <ul className="flex flex-col">
+                  {/* Sin recortar: el anillo de foco de cada fila se sale 8 px de ella. */}
+                  <ul className="flex flex-col divide-y divide-border py-1 surface-raised halo-surface-1">
                     {group.lessons.map((lesson) => {
                       const href = lessonPath(course.slug, lesson.id);
                       if (href === null) return null;
@@ -193,6 +200,7 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
                             title={lesson.title}
                             duration={lessonMinutes(lesson.durationSeconds)}
                             state={locked ? LOCKED : (standing?.states.get(lesson.id) ?? NOT_STARTED)}
+                            rosette
                           />
                         </li>
                       );
@@ -205,7 +213,7 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
 
           <div className="flex flex-col gap-8 md:col-span-5">
             {detail.teacher !== null && (
-              <aside aria-labelledby="sobre-maestro" className="flex flex-col gap-3">
+              <aside aria-labelledby="sobre-maestro" className="flex flex-col gap-3 p-5 surface-raised halo-surface-1">
                 <h2 id="sobre-maestro" className="text-h3">
                   {t(text.about, { name: detail.teacher.name })}
                 </h2>
@@ -214,7 +222,7 @@ export default async function CourseRoute({ params }: { params: Promise<{ slug: 
               </aside>
             )}
             {resources.length > 0 && (
-              <section id={RESOURCES_ID} aria-labelledby="recursos-titulo" className="flex flex-col gap-3">
+              <section id={RESOURCES_ID} aria-labelledby="recursos-titulo" className="flex flex-col gap-3 p-5 surface-raised halo-surface-1">
                 <h2 id="recursos-titulo" className="text-h3">
                   {messages.resources.courseTitle}
                 </h2>

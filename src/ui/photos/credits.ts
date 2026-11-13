@@ -14,8 +14,11 @@ export const LICENSES = {
   Unsplash: "Licencia de Unsplash: uso comercial, sin atribución obligatoria (https://unsplash.com/license)",
 } as const;
 
-/** Dónde va cada foto (diseño, sección 3.12): la portada, el acceso, la cabecera del inicio y las fichas por práctica. */
-export type PhotoPlace = "portada" | "acceso" | "inicio" | "practica";
+/**
+ * Dónde va cada foto (diseño, sección 3.12): la portada, el acceso, la cabecera del inicio, la de explorar y las fichas por
+ * práctica. Desde T-616 (solicitud 3) el faro dejó la cabecera del inicio, que lleva siempre las estrellas, y va en la de explorar.
+ */
+export type PhotoPlace = "portada" | "acceso" | "inicio" | "explorar" | "practica";
 
 export interface PhotoCredit {
   file: string;
@@ -51,8 +54,8 @@ export const PHOTO_CREDITS: readonly PhotoCredit[] = [
     downloaded: "2026-11-05",
   },
   {
-    file: "inicio-faro.jpg",
-    place: "inicio",
+    file: "explorar-faro.jpg",
+    place: "explorar",
     title: "Lighthouse on the Ocean",
     source: "Pexels",
     author: "Денис Нагайцев",

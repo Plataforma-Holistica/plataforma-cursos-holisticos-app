@@ -5,6 +5,7 @@ import { t } from "@/messages/format";
 import { ui } from "@/messages/es/ui";
 
 import { cx } from "./cx";
+import { Rosette } from "./flower";
 import { Icon } from "./icon";
 
 // Fila de lección (`LessonRow`, diseño, sección 5.3): una lección dentro del temario (PA-02,
@@ -17,6 +18,10 @@ import { Icon } from "./icon";
 // que se está viendo, en reproducción, que se suma a terminada y tapa a medias (T-206). Y, para el
 // visitante de un curso que pide suscripción, con candado: «Requiere suscripción» (T-210). Sigue
 // siendo un enlace: la lección manda a entrar.
+//
+// Con `rosette` (T-616, solicitud 3; la ficha del curso), a medias y terminada llevan la roseta de la flor de la
+// vida en lugar del icono: en trazo a medias, en oro terminada, como la marca de un curso. Sin empezar, con candado y la que
+// se está viendo siguen con su icono. Lo que dice el nombre no cambia.
 
 export interface LessonRowProps {
   href: string;
@@ -28,6 +33,8 @@ export interface LessonRowProps {
   current?: boolean;
   /** Lo que lleva quien mira (T-206), o el candado del visitante (T-210). */
   state?: "not_started" | "in_progress" | "completed" | "locked";
+  /** El avance se marca con la roseta (la ficha del curso) y no con el icono (la lección). */
+  rosette?: boolean;
 }
 
 type Words = (typeof ui)["lessonRow"];
@@ -50,9 +57,10 @@ function wording(state: NonNullable<LessonRowProps["state"]>, current: boolean):
 
 const ICONS = { not_started: Circle, in_progress: LoaderCircle, completed: CircleCheck, locked: Lock } as const;
 
-export function LessonRow({ href, number, title, duration, current = false, state = "not_started" }: LessonRowProps) {
+export function LessonRow({ href, number, title, duration, current = false, state = "not_started", rosette = false }: LessonRowProps) {
   const words = wording(state, current);
   const name = t(words.name, { number, title, duration });
+  const withRosette = rosette && !current && (state === "in_progress" || state === "completed");
   return (
     <Link
       href={href}
@@ -63,11 +71,15 @@ export function LessonRow({ href, number, title, duration, current = false, stat
       )}
     >
       <span className="sr-only">{name}</span>
-      <Icon
-        icon={current ? CirclePlay : ICONS[state]}
-        size={20}
-        className={current || state === "in_progress" || state === "completed" ? "mt-0.5 text-accent" : "mt-0.5 text-text-3"}
-      />
+      {withRosette ? (
+        <Rosette complete={state === "completed"} className="mt-0.5 size-5" />
+      ) : (
+        <Icon
+          icon={current ? CirclePlay : ICONS[state]}
+          size={20}
+          className={current || state === "in_progress" || state === "completed" ? "mt-0.5 text-accent" : "mt-0.5 text-text-3"}
+        />
+      )}
       <span aria-hidden="true" className="w-6 shrink-0 text-body-s text-text-2 tabular-nums">
         {number}
       </span>

@@ -6,6 +6,7 @@ import { MY_LIST_ARRIVAL } from "@/app/_catalog/my-list/arrival";
 import { MyListBlock, type ListCourse } from "@/app/_catalog/my-list/my-list-block";
 import type { ListState } from "@/app/_catalog/my-list/outcomes";
 import { SaveCourseButton } from "@/app/_catalog/my-list/save-button";
+import { CourseCard } from "@/ui/course-card";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 
 import { a11yViolations } from "../setup/a11y";
@@ -87,6 +88,40 @@ describe("el botón de guardar (PA-02, PA-21)", () => {
     expect(screen.getAllByText(said)).toHaveLength(2);
   });
 
+  // El marcador de la esquina (T-616, solicitud 3; revisión de la 3a): el aviso cabe en el ancho de la tarjeta. Se ancla a la
+  // franja de la esquina, que mide lo que la tarjeta menos su margen, y no al botón de 44 px, donde un ancho fijo se salía por
+  // la izquierda en la columna izquierda del teléfono (a 320 px, 48 px fuera).
+  it("como marcador en la esquina de una tarjeta, el aviso de lo que salió mal va a lo ancho de la tarjeta", async () => {
+    const { action, answer } = waitingAction();
+    const user = userEvent.setup();
+    const { container } = render(
+      <CourseCard
+        href="/cursos/respirar"
+        courseKey="respirar"
+        title="Respirar"
+        teacherName="Ana Robles"
+        practice={null}
+        levelName={null}
+        lessonCount={2}
+        corner={button({ action, variant: "icon" })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Guardar en mi lista: Respirar" }));
+    await answer({ kind: "unavailable", slug: "respirar", attempt: 1 });
+    // El que se ve, bajo el botón (el otro es la región que lo dice).
+    const box = screen
+      .getAllByText("No pudimos cambiar tu lista. Inténtalo de nuevo en un momento.")
+      .map((element) => element.closest(".top-full"))
+      .find((element) => element !== null);
+    expect(box).toHaveClass("inset-x-0");
+    expect(box?.className).not.toMatch(/\bw-\d/);
+    // Su caja de referencia es la franja de la esquina, a lo ancho de la tarjeta: ni el formulario ni el botón la acotan.
+    expect(box?.parentElement).not.toHaveClass("relative");
+    const strip = container.querySelector(".top-2.right-2");
+    expect(strip).toHaveClass("left-2");
+    expect(strip).toContainElement(box as HTMLElement);
+  });
+
   it("mientras va otro envío, lo que dijo el anterior deja de decirse", async () => {
     const { action, answer } = waitingAction();
     const user = userEvent.setup();
@@ -142,9 +177,13 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
   });
 
   // «Mi lista» de la barra del alumno lleva a este bloque (T-616, solicitud 2).
+  // Desde T-616 (solicitud 3) la nota es un estado con la flor: su título y qué hacer. Lo que se esconde es el estado entero
+  // (`data-list-empty`), no solo su texto.
   it("vacío, dice que no hay nada guardado solo cuando se llega por su ancla", () => {
     const { container } = render(page(vi.fn(), []));
-    const note = screen.getByText(/Todavía no guardas ningún curso/);
+    const note = screen.getByText(/Todavía no guardas ningún curso/).closest<HTMLElement>("[data-list-empty]");
+    expect(note).toContainElement(screen.getByText("Usa «Guardar en mi lista» en la ficha de un curso o en Explorar."));
+    expect(note?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     // Escondido salvo con `:target`: el inicio sin nada guardado sigue sin «Mi lista» (T-210).
     expect(note).toHaveClass("hidden", "group-target/lista:block");
     // Un grupo con nombre: el de las tarjetas no tiene, y uno sin nombre las encendería todas a la vez.
@@ -155,7 +194,7 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
 
   it("vacío, al avisarle la barra que se llegó, lo dice y toma el foco", async () => {
     const { container } = render(page(vi.fn(), []));
-    const note = screen.getByText(/Todavía no guardas ningún curso/);
+    const note = screen.getByText(/Todavía no guardas ningún curso/).closest<HTMLElement>("[data-list-empty]");
     act(() => {
       window.dispatchEvent(new Event(MY_LIST_ARRIVAL));
     });
