@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { SideFrame } from "@/app/_lib/side-nav";
 import { messages } from "@/messages";
 import { ROUTES } from "@/services/account/navigation";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 
 // El marco de toda pantalla del portal del maestro (diseño, `SideNav`; decisión de Sergio del
 // 2026-10-29: mínimo, con lo que existe). Cada tarea le suma su entrada: el panel (T-408), los pagos, la
@@ -42,10 +41,12 @@ export function ReadOnlyBanner() {
 
 export function PortalFrame({ current, readOnly, children }: { current: PortalEntry; readOnly: boolean; children: ReactNode }) {
   return (
-    <SideFrame home={ROUTES.portal} groups={[{ links: LINKS }]} current={current} text={text} banner={readOnly && <ReadOnlyBanner />}>
-      <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-8 px-4 py-10 outline-none sm:px-8">
+    // El menú como segundo plano (`side-plane`), igual que en administración: el envoltorio viste al `<nav>` de
+    // `SideFrame`. El `<main>` lo trae cada pantalla, con `PortalMain` (`shell.tsx`; T-616, solicitud 5).
+    <div className="side-plane">
+      <SideFrame home={ROUTES.portal} groups={[{ links: LINKS }]} current={current} text={text} banner={readOnly && <ReadOnlyBanner />}>
         {children}
-      </main>
-    </SideFrame>
+      </SideFrame>
+    </div>
   );
 }

@@ -6,6 +6,7 @@ import { comments as text } from "@/messages/es/comments";
 import { t } from "@/messages/format";
 import { lessonPath } from "@/services/account/navigation";
 import type { GateRefusal, TeacherThread, WriteStanding } from "@/services/comments/comments";
+import { FlowerState } from "@/ui/flower-state";
 import { TextLink } from "@/ui/text-link";
 
 import { teacherCommentAction } from "./actions";
@@ -54,7 +55,7 @@ export function TeacherComments({ items, here, filters, pagedThread, write, unan
       <StrayText text={strayText} />
       {!canWrite(standing) && items.length > 0 && <Instead write={standing} />}
       {items.length === 0 ? (
-        <p className="text-body text-text-2">{unanswered ? text.portal.emptyUnanswered : text.portal.empty}</p>
+        <FlowerState title={unanswered ? text.portal.emptyUnanswered : text.portal.empty} className="surface-raised" />
       ) : (
         <ol className="flex flex-col divide-y divide-border">
           {items.map((thread) => {

@@ -13,6 +13,7 @@ import { clabeWaitingText } from "./_fiscal/clabe-wait";
 import { dashboardView } from "./_inicio/outcomes";
 import { DashboardPanel, DashboardUnavailable } from "./_inicio/screen";
 import { PortalFrame } from "./_lib/frame";
+import { PortalMain } from "./_lib/shell";
 
 // El inicio del portal del maestro (`/portal`): el panel, PA-41 (T-401 y T-408). Primero la guarda; después los avisos (lo aceptado, la cuenta en solo
 // lectura con el texto que se escribió para el maestro y nunca el motivo interno, los datos fiscales y la CLABE) y el panel. A quien no es maestro le
@@ -35,28 +36,32 @@ export default async function PortalHomePage() {
   const panel = dashboard.kind === "ready" && dashboard.value.outcome === "ok" ? dashboardView(dashboard.value.value, taxData, suspended) : null;
   return (
     <PortalFrame current={ROUTES.portal} readOnly={suspended}>
-      <h1 className="text-h1">{text.title}</h1>
-      {notice === "teacher_accepted" && <InlineAlert tone="success">{t(text.accepted)}</InlineAlert>}
-      {notice === "teacher_notice_accepted" && <InlineAlert tone="success">{text.noticeAccepted}</InlineAlert>}
-      {suspended && step.teacher.notice !== null && (
-        <section className="flex flex-col gap-2">
-          <h2 className="text-h3">{t(text.suspendedTitle)}</h2>
-          <p className="text-text-2">{step.teacher.notice}</p>
-        </section>
-      )}
-      {taxData?.version === 0 && taxData.canSave && (
-        <InlineAlert tone="warning">
-          {text.taxDataMissing} <TextLink href={ROUTES.portalTaxData}>{text.taxDataLink}</TextLink>
-        </InlineAlert>
-      )}
-      {taxData?.clabeWaitsUntil != null && <InlineAlert tone="warning">{clabeWaitingText(taxData.clabeWaitsUntil)}</InlineAlert>}
-      {taxData?.clabeNoticePending === true && <InlineAlert tone="warning">{messages.portal.taxData.clabeNoticePending}</InlineAlert>}
-      {taxData?.clabeRecapture === true && taxData.canSave && (
-        <InlineAlert tone="warning">
-          {messages.portal.taxData.clabeRecapture} <TextLink href={`${ROUTES.portalTaxData}?cambiar=1`}>{messages.portal.taxData.clabeRecaptureLink}</TextLink>
-        </InlineAlert>
-      )}
-      {panel === null ? <DashboardUnavailable /> : <DashboardPanel view={panel} />}
+      <PortalMain title={text.title} section>
+        {/* Los avisos, juntos y arriba: es lo que falta hacer. Sin ninguno, el bloque no ocupa lugar. */}
+        <div className="flex flex-col gap-3 empty:hidden">
+          {notice === "teacher_accepted" && <InlineAlert tone="success">{t(text.accepted)}</InlineAlert>}
+          {notice === "teacher_notice_accepted" && <InlineAlert tone="success">{text.noticeAccepted}</InlineAlert>}
+          {suspended && step.teacher.notice !== null && (
+            <section className="flex flex-col gap-2">
+              <h2 className="text-h3">{t(text.suspendedTitle)}</h2>
+              <p className="max-w-reading text-text-2">{step.teacher.notice}</p>
+            </section>
+          )}
+          {taxData?.version === 0 && taxData.canSave && (
+            <InlineAlert tone="warning">
+              {text.taxDataMissing} <TextLink href={ROUTES.portalTaxData}>{text.taxDataLink}</TextLink>
+            </InlineAlert>
+          )}
+          {taxData?.clabeWaitsUntil != null && <InlineAlert tone="warning">{clabeWaitingText(taxData.clabeWaitsUntil)}</InlineAlert>}
+          {taxData?.clabeNoticePending === true && <InlineAlert tone="warning">{messages.portal.taxData.clabeNoticePending}</InlineAlert>}
+          {taxData?.clabeRecapture === true && taxData.canSave && (
+            <InlineAlert tone="warning">
+              {messages.portal.taxData.clabeRecapture} <TextLink href={`${ROUTES.portalTaxData}?cambiar=1`}>{messages.portal.taxData.clabeRecaptureLink}</TextLink>
+            </InlineAlert>
+          )}
+        </div>
+        {panel === null ? <DashboardUnavailable /> : <DashboardPanel view={panel} />}
+      </PortalMain>
     </PortalFrame>
   );
 }

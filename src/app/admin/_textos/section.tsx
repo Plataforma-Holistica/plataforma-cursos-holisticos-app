@@ -10,8 +10,9 @@ import { legalVersionPath, ROUTES } from "@/services/account/navigation";
 import { NOTICE_MAX_AGE_SECONDS, readNotice } from "@/services/account/notice";
 import { legalBlocks, legalDocuments, legalVersion } from "@/services/legal/legal-admin";
 import { InlineAlert } from "@/ui/inline-alert";
-import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TextLink } from "@/ui/text-link";
+
+import { AdminMain } from "../_lib/shell";
 
 import { acceptedPublishedNotice, docName, legalView } from "./rows";
 import { LegalScreen } from "./screen";
@@ -42,20 +43,23 @@ export async function LegalVersionSection({ claims, id }: { claims: VerifiedClai
   if (read.kind === "not_found") notFound();
   const version = read.text;
   return (
-    <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-reading flex-col gap-6 px-4 py-16 outline-none">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-h1">{t(text.version.title, { name: docName(version.docType), version: version.version })}</h1>
-        <p className="text-body-s text-text-2">
-          {t(text.version.details, { date: longDate(version.effectiveFrom), published: longDate(version.publishedAt) })}
-        </p>
-        <p className="text-body-s text-text-2">{t(text.version.fingerprint, { sha: version.bodySha256 })}</p>
-      </div>
+    <AdminMain
+      area="config"
+      title={t(text.version.title, { name: docName(version.docType), version: version.version })}
+      lead={
+        <>
+          <p className="text-body-s">{t(text.version.details, { date: longDate(version.effectiveFrom), published: longDate(version.publishedAt) })}</p>
+          <p className="text-body-s break-all">{t(text.version.fingerprint, { sha: version.bodySha256 })}</p>
+        </>
+      }
+      measure="reading"
+    >
       {version.version === 0 && <InlineAlert tone="warning">{text.version.draft}</InlineAlert>}
       <p className="text-h2">{version.title}</p>
       <LegalBody title={version.title} blocks={legalBlocks(version.body)} />
       <p className="text-body-s">
         <TextLink href={ROUTES.legalTexts}>{text.version.back}</TextLink>
       </p>
-    </main>
+    </AdminMain>
   );
 }

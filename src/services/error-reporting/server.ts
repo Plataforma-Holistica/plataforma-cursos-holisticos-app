@@ -153,6 +153,8 @@ const FAILURES = {
   billing_reconciliation_rejected:
     "La base rechazó por su forma los cargos que el servidor leyó de Stripe para comparar un mes. No debería pasar: es una falla de código o una respuesta de Stripe que cambió de forma.",
   checkout_unavailable: "La salida a pagar (PA-04 o PA-32) no pudo leer o escribir en la base. La persona ve «no se pudo» y puede reintentar; nada se cobró.",
+  plans_showcase_unavailable:
+    "La portada no pudo leer los precios de los planes (T-616): se mostró sin cifras, con lo que incluye y el enlace a los planes. Se recuerda 15 s; si se repite, la base no contesta.",
   checkout_no_key: "Alguien quiso salir a pagar y no hay llave de la salida a pagar: no se puede vender. Revisar la configuración del despliegue.",
   checkout_key_rejected: "Stripe rechazó la llave de la salida a pagar al crear una sesión: le faltan permisos o se revocó. Nadie puede pagar hasta corregirla.",
   checkout_price_mismatch:
