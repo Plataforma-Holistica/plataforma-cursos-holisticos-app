@@ -26,6 +26,7 @@ import { Rosette } from "./flower";
 //   cursos con el mismo título no comparten portada;
 // - `corner` es lo que va sobre la esquina de la portada, fuera del enlace (un botón dentro de un enlace no
 //   vale): «Guardar en mi lista» como botón de icono. Va como hermano del enlace, encima de la portada;
+// - la línea de datos no repite la práctica, que ya va arriba en el cartel (solicitud 3);
 // - al pasar el cursor la portada sube 4 px y su borde de luz aclara; con movimiento reducido no sube.
 
 export interface CourseCardProps {
@@ -72,7 +73,8 @@ export function CourseCard({
           total: progress.total,
           completed: t(plural(progress.total, text.completedOf), { completed: Math.min(progress.completed, progress.total), total: progress.total }),
         });
-  const meta = [practice?.name, levelName, t(plural(lessonCount, text.lessons), { count: lessonCount })].filter(
+  // Sin la práctica: ya va arriba, en el cartel (T-616, solicitud 3).
+  const meta = [levelName, t(plural(lessonCount, text.lessons), { count: lessonCount })].filter(
     (part): part is string => typeof part === "string",
   );
   return (
@@ -113,9 +115,13 @@ export function CourseCard({
           )}
         </span>
       </Link>
-      {/* Sube con la portada al pasar el cursor, para no quedar desfasada. */}
+      {/* Sube con la portada al pasar el cursor, para no quedar desfasada. Es una franja a lo ancho de la tarjeta (menos su
+          margen), con lo suyo a la derecha: así lo que cuelga de la esquina (el aviso del marcador) se mide con la tarjeta y no
+          con el botón. La franja deja pasar el puntero al enlace de abajo; lo de la esquina lo recibe. */}
       {corner !== undefined && (
-        <div className="absolute top-2 right-2 transition duration-(--duration-base) ease-standard motion-safe:group-hover:-translate-y-1">{corner}</div>
+        <div className="pointer-events-none absolute top-2 right-2 left-2 flex justify-end transition duration-(--duration-base) ease-standard motion-safe:group-hover:-translate-y-1 *:pointer-events-auto">
+          {corner}
+        </div>
       )}
     </div>
   );

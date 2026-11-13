@@ -39,11 +39,12 @@ export function TeacherCard({ href, name, practices, tone, practicePosition, sha
           aria-hidden="true"
           className="block rounded-full p-1 ring-1 ring-accent-muted transition duration-(--duration-base) ease-standard group-hover:ring-accent motion-safe:group-hover:-translate-y-1"
         >
-          <span className={cx("@container relative flex size-32 items-center justify-center overflow-hidden rounded-full bg-linear-to-t sm:size-36", toneClasses(tone))}>
+          {/* 120 px en todo ancho (T-616, solicitud 3: «Por maestro» va en la rejilla, sin caja). */}
+          <span className={cx("@container relative flex size-30 items-center justify-center overflow-hidden rounded-full bg-linear-to-t", toneClasses(tone))}>
             {photo === null ? (
               <span className="font-display text-cover-initial text-text">{initial}</span>
             ) : (
-              <Image src={photo} alt="" fill sizes="144px" className="object-cover" />
+              <Image src={photo} alt="" fill sizes="120px" className="object-cover" />
             )}
           </span>
         </span>

@@ -712,10 +712,11 @@ test("lo visto queda guardado; al volver arranca donde se quedó, y el inicio lo
   // Al inicio, por la barra del alumno (desde T-614, «Volver al curso» lleva a la ficha).
   await page.getByRole("navigation", { name: "Principal" }).getByRole("link", { name: "Inicio" }).click();
   await expect(page).toHaveURL("/inicio");
-  // Desde T-210, una tarjeta del carrusel: su nombre dice la lección sugerida y lo que dice su barra, que solo se ve.
+  // Desde T-210, su nombre dice la lección sugerida y lo que dice su barra, que solo se ve. Cambió por el requisito (T-616, 3a): el
+  // primero es el protagonista del inicio, y su nombre termina con lo que dice su botón (WCAG 2.5.3).
   const offered = page
     .getByRole("list", { name: "Continuar viendo" })
-    .getByRole("link", { name: `Curso ${SLUG}, con Maestra de lección: lección 1 de 1, 0 de 1 terminada`, exact: true });
+    .getByRole("link", { name: `Curso ${SLUG}, con Maestra de lección: lección 1 de 1, 0 de 1 terminada. Continuar: lección 1`, exact: true });
   await expect(offered).toBeVisible();
   expect(await a11yViolations(page)).toEqual([]);
   await offered.click();

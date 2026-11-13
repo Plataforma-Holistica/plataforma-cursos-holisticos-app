@@ -1,17 +1,15 @@
 "use client";
 
-import { Search, SlidersHorizontal, X } from "lucide";
+import { ArrowRight, ChevronDown, Search, SlidersHorizontal, X } from "lucide";
 import Form from "next/form";
 import Link from "next/link";
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, type MouseEvent, useEffect, useId, useRef, useState } from "react";
 
 import { useHydrated } from "@/app/(cuenta)/_lib/hooks";
 
 import { browse } from "@/messages/es/browse";
 import { t } from "@/messages/format";
-import { Button } from "@/ui/button";
 import { cx } from "@/ui/cx";
-import { FieldLabel, INPUT_CLASSES } from "@/ui/field";
 import { Icon } from "@/ui/icon";
 
 // El buscador y los filtros de explorar (`SearchField` y `FilterChips`, diseño, sección 5.3;
@@ -22,6 +20,13 @@ import { Icon } from "@/ui/icon";
 //
 // En el teléfono el buscador va arriba, fijo, y los filtros se abren con «Filtros» (sin
 // JavaScript se ven siempre). Las etiquetas de los filtros activos las pinta la página.
+//
+// T-616, solicitud 3 (lo decidió el prototipo de la dirección, del carril A; decisiones sin confirmar):
+// - un solo buscador alto, de a lo más 720 px (`max-w-search`), redondeado y sobre una superficie elevada, con el envío como
+//   botón de icono dentro del campo (su nombre es «Buscar»: sin JavaScript es el que busca);
+// - la práctica como fichas, que son enlaces (las arma la página: un componente del navegador no recibe funciones), con la
+//   elegida en un campo oculto para que buscar la conserve; en el teléfono se deslizan y se desvanecen en el borde;
+// - maestro y nivel en selectores discretos, a la derecha de las fichas, en la misma fila desde `sm`.
 
 const text = browse.explore;
 
@@ -33,6 +38,17 @@ export interface ExploreFormOption {
   name: string;
 }
 
+/**
+ * Una ficha de práctica: su práctica (vacía la de «Todas», que va primero), su nombre, a dónde lleva sin JavaScript (lo
+ * mostrado con esa práctica) y si es la elegida.
+ */
+export interface PracticeChip {
+  slug: string;
+  name: string;
+  href: string;
+  current: boolean;
+}
+
 export interface ExploreFormProps {
   action: string;
   /** Lo que la página está mostrando: con eso arranca el formulario, y lo vuelve a tomar al cambiar. */
@@ -41,7 +57,7 @@ export interface ExploreFormProps {
   shownPath: string;
   /** La misma página sin la búsqueda, para el botón que la borra. */
   withoutSearch: string;
-  practices: readonly ExploreFormOption[];
+  practices: readonly PracticeChip[];
   teachers: readonly ExploreFormOption[];
   levels: readonly ExploreFormOption[];
 }
@@ -106,6 +122,20 @@ export function ExploreForm({ action, query, shownPath, withoutSearch, practices
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = setTimeout(() => submitNow(true), PAUSE_MS);
   };
+
+  // Una ficha de práctica, con JavaScript: en vez de su enlace (que lleva la búsqueda mostrada), el formulario sale ya con lo
+  // tecleado en ese momento y esa práctica, y no sale nada más después (revisión del carril A de la 3a: si se escribía y se
+  // pulsaba una ficha antes de la búsqueda sola, ganaba la ficha y se borraba lo escrito). El campo oculto se pone a mano
+  // antes de enviar, porque el estado se pinta después. Con una tecla de modificación (abrir en otra pestaña) o sin
+  // JavaScript, el enlace de siempre.
+  const chosenField = useRef<HTMLInputElement>(null);
+  const pickPractice = (event: MouseEvent<HTMLAnchorElement>, slug: string) => {
+    if (!js || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    setChosen((now) => ({ ...now, practica: slug }));
+    if (chosenField.current !== null) chosenField.current.value = slug;
+    submitNow(false);
+  };
   // Al salir de un campo con un envío pendiente, sale ya: si lo que sigue es pulsar un enlace, su
   // navegación llega después y es la que queda.
   const flush = () => {
@@ -128,9 +158,12 @@ export function ExploreForm({ action, query, shownPath, withoutSearch, practices
     }, 0);
   };
 
-  const filter = (name: "practica" | "maestro" | "nivel", label: string, any: string, options: readonly ExploreFormOption[]) => (
-    <div className="flex min-w-0 flex-1 flex-col gap-2">
-      <FieldLabel htmlFor={`${ids}-${name}`}>{label}</FieldLabel>
+  // Un selector discreto: su nombre es para quien no lo ve; a la vista, la opción elegida («Todos los niveles») ya lo dice.
+  const filter = (name: "maestro" | "nivel", label: string, any: string, options: readonly ExploreFormOption[]) => (
+    <div className="relative min-w-0">
+      <label htmlFor={`${ids}-${name}`} className="sr-only">
+        {label}
+      </label>
       <select
         id={`${ids}-${name}`}
         name={name}
@@ -142,7 +175,10 @@ export function ExploreForm({ action, query, shownPath, withoutSearch, practices
           if (js) submitSoon();
         }}
         onBlur={flush}
-        className={INPUT_CLASSES}
+        className={cx(
+          "min-h-touch w-full max-w-64 cursor-pointer appearance-none truncate rounded-full border bg-surface-1 py-2 pr-10 pl-4 text-body-s text-text transition-colors duration-(--duration-fast) ease-standard halo-surface-1 hover:border-border-control",
+          chosen[name] === "" ? "border-border" : "border-accent-muted",
+        )}
       >
         <option value="">{any}</option>
         {options.map((option) => (
@@ -151,6 +187,7 @@ export function ExploreForm({ action, query, shownPath, withoutSearch, practices
           </option>
         ))}
       </select>
+      <Icon icon={ChevronDown} size={16} className="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-text-3" />
     </div>
   );
 
@@ -159,70 +196,102 @@ export function ExploreForm({ action, query, shownPath, withoutSearch, practices
   // la caja de su padre); los filtros van fuera del formulario y se le unen con `form`.
   return (
     <>
-      <div className="sticky top-0 z-10 bg-bg px-4 py-2 sm:static sm:px-8 sm:py-0">
-        <Form id={formId} ref={form} action={action} replace scroll={false} role="search" onSubmit={dropEmpty} className="flex flex-col gap-2">
-          <FieldLabel htmlFor={`${ids}-q`}>{t(text.searchLabel)}</FieldLabel>
-          <div className="flex gap-2">
-            <div className="relative min-w-0 flex-1">
-              <Icon icon={Search} size={20} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-text-3" />
-              <input
-                ref={box}
-                id={`${ids}-q`}
-                type="search"
-                name="q"
-                value={typed}
-                maxLength={200}
-                autoComplete="off"
-                enterKeyHint="search"
-                onFocus={() => setTyping(true)}
-                onBlur={() => {
-                  setTyping(false);
-                  flush();
-                }}
-                onChange={(event) => {
-                  setTyped(event.target.value);
-                  submitSoon();
-                }}
-                className={cx(INPUT_CLASSES, "w-full pl-10", query.q !== null && "pr-12")}
-              />
+      <div className="sticky top-0 z-10 bg-bg px-4 py-2 sm:static sm:bg-transparent sm:px-8 sm:py-0">
+        <Form id={formId} ref={form} action={action} replace scroll={false} role="search" onSubmit={dropEmpty} className="w-full max-w-search">
+          <label htmlFor={`${ids}-q`} className="sr-only">
+            {t(text.searchLabel)}
+          </label>
+          <div className="relative">
+            <Icon icon={Search} size={20} className="pointer-events-none absolute top-1/2 left-5 -translate-y-1/2 text-text-3" />
+            <input
+              ref={box}
+              id={`${ids}-q`}
+              type="search"
+              name="q"
+              value={typed}
+              maxLength={200}
+              autoComplete="off"
+              enterKeyHint="search"
+              placeholder={t(text.searchLabel)}
+              onFocus={() => setTyping(true)}
+              onBlur={() => {
+                setTyping(false);
+                flush();
+              }}
+              onChange={(event) => {
+                setTyped(event.target.value);
+                submitSoon();
+              }}
+              className={cx(
+                // Su sombra tapa el halo del foco global: con el foco, el halo vuelve (`shadow-focus`).
+                "h-14 w-full rounded-full border border-border-control bg-surface-1 pl-13 text-body-l text-text shadow-raised halo-surface-1 placeholder:text-text-3 focus-visible:shadow-focus",
+                query.q !== null ? "pr-28" : "pr-16",
+              )}
+            />
+            <div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-1">
               {query.q !== null && (
-                <Link
-                  href={withoutSearch}
-                  replace
-                  scroll={false}
-                  className="absolute top-1/2 right-0 flex size-touch -translate-y-1/2 items-center justify-center text-text-2 hover:text-text"
-                >
+                <Link href={withoutSearch} replace scroll={false} className="flex size-touch items-center justify-center rounded-full text-text-2 hover:text-text">
                   <Icon icon={X} size={20} label={text.clearSearch} />
                 </Link>
               )}
+              {/* El envío, dentro del campo: un botón de icono con su nombre. Sin JavaScript es el que busca. */}
+              <button
+                type="submit"
+                className="flex size-touch cursor-pointer items-center justify-center rounded-full bg-accent text-on-accent transition-colors duration-(--duration-fast) ease-standard halo-surface-1 hover:bg-accent-strong"
+              >
+                <Icon icon={ArrowRight} size={20} label={text.search} />
+              </button>
             </div>
-            {/* Junto al campo también en el teléfono: el primario ocupa todo el ancho por omisión. */}
-            <Button type="submit" className="shrink-0 max-sm:w-auto">
-              {text.search}
-            </Button>
           </div>
+          {/* La práctica elegida viaja con la búsqueda: las fichas de abajo son enlaces, no campos. Va después del buscador:
+              sin JavaScript la dirección sale en el orden de los campos, y empieza por la búsqueda (`/explorar?q=…`, FL-11). */}
+          <input ref={chosenField} type="hidden" name="practica" value={chosen.practica} />
         </Form>
       </div>
 
-      <div className="flex flex-col gap-4 px-4 sm:px-8">
-        {js && (
-          <div className="sm:hidden">
-            <button
-              type="button"
-              aria-expanded={open}
-              aria-controls={`${ids}-filtros`}
-              onClick={() => setOpen(!open)}
-              className="inline-flex min-h-touch items-center gap-2 rounded-md border border-border px-4 text-body text-text hover:bg-surface-2"
-            >
-              <Icon icon={SlidersHorizontal} size={20} />
-              {text.filters}
-            </button>
+      <div className="px-4 sm:px-8">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-6">
+          <nav aria-label={text.practice} className="min-w-0 sm:flex-1">
+            {/* Aire arriba (`pt-3`, devuelto con `-mt-3`), como en `Carousel`: la lista desplaza en horizontal, y eso también
+                recorta en vertical; sin él se cortaba el anillo de foco de las fichas. */}
+            <ul className="-mx-4 -mt-3 flex snap-x scroll-px-4 gap-2 overflow-x-auto px-4 pt-3 pb-1 scrollbar-none max-sm:mask-r-from-85% sm:mx-0 sm:flex-wrap sm:px-0">
+              {practices.map((chip) => (
+                <li key={chip.href} className="shrink-0 snap-start">
+                  <Link
+                    href={chip.href}
+                    replace
+                    scroll={false}
+                    onClick={(event) => pickPractice(event, chip.slug)}
+                    aria-current={chip.current ? "true" : undefined}
+                    className={cx(
+                      "inline-flex min-h-touch items-center rounded-full border px-4 text-body-s whitespace-nowrap transition-colors duration-(--duration-fast) ease-standard",
+                      chip.current ? "border-accent bg-accent-subtle text-text" : "border-border text-text-2 hover:border-border-control hover:text-text",
+                    )}
+                  >
+                    {chip.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          {js && (
+            <div className="sm:hidden">
+              <button
+                type="button"
+                aria-expanded={open}
+                aria-controls={`${ids}-filtros`}
+                onClick={() => setOpen(!open)}
+                className="inline-flex min-h-touch items-center gap-2 rounded-full border border-border px-4 text-body-s text-text hover:bg-surface-2"
+              >
+                <Icon icon={SlidersHorizontal} size={20} />
+                {text.filters}
+              </button>
+            </div>
+          )}
+          <div id={`${ids}-filtros`} className={cx("flex flex-wrap items-center gap-2 sm:shrink-0 sm:flex-nowrap", js && !open && "hidden sm:flex")}>
+            {filter("maestro", t(text.teacher), t(text.anyTeacher), teachers)}
+            {filter("nivel", text.level, text.anyLevel, levels)}
           </div>
-        )}
-        <div id={`${ids}-filtros`} className={cx("flex flex-col gap-4 sm:flex-row", js && !open && "hidden sm:flex")}>
-          {filter("practica", text.practice, text.anyPractice, practices)}
-          {filter("maestro", t(text.teacher), t(text.anyTeacher), teachers)}
-          {filter("nivel", text.level, text.anyLevel, levels)}
         </div>
       </div>
     </>

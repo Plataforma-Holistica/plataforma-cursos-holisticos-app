@@ -8,6 +8,7 @@ import { Button } from "@/ui/button";
 import { Carousel } from "@/ui/carousel";
 import { CourseCard } from "@/ui/course-card";
 import { cx } from "@/ui/cx";
+import { FlowerState } from "@/ui/flower-state";
 import { InlineAlert } from "@/ui/inline-alert";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 
@@ -28,6 +29,10 @@ import type { ListState } from "./outcomes";
 // «Mi lista» de la barra del alumno lleva a este bloque por su ancla (T-616): al llegar toma el foco, y si no
 // hay nada guardado lo dice, solo entonces: el inicio sin nada guardado sigue sin «Mi lista». La llegada la avisa
 // el enlace (`MY_LIST_ARRIVAL`), o la trae la dirección al montarse; sin JavaScript, la nota sale por `:target`.
+//
+// Desde T-616 (solicitud 3), la nota es un estado con la flor (`FlowerState`), y el aire de arriba lo pone quien lo usa en lo
+// que se ve (`offset`): el bloque está siempre, también vacío, y no debe sumar aire si no muestra nada. La práctica de cada
+// curso viaja con su orden en el catálogo, que elige el motivo de su portada.
 
 const text = browse.myList;
 const IDLE: ListState = { kind: "idle" };
@@ -37,7 +42,7 @@ export interface ListCourse {
   href: string;
   title: string;
   teacherName: string;
-  practice: { name: string; tone: number } | null;
+  practice: { name: string; tone: number; slug?: string; position?: number } | null;
   levelName: string | null;
   lessonCount: number;
   isOpen: boolean;
@@ -50,11 +55,13 @@ export interface MyListBlockProps {
   permalink: string;
   /** El `id` del bloque, el ancla de `permalink`. */
   id: string;
+  /** El aire de arriba, en lo que se ve (el carrusel o la nota), nunca en el bloque vacío. */
+  offset?: string;
 }
 
 const removeValue = (slug: string) => `remove:${slug}`;
 
-export function MyListBlock({ action, courses, permalink, id }: MyListBlockProps) {
+export function MyListBlock({ action, courses, permalink, id, offset }: MyListBlockProps) {
   const [state, formAction, pending] = useActionState(action, IDLE, permalink);
   const block = useRef<HTMLDivElement>(null);
   const form = useRef<HTMLFormElement>(null);
@@ -138,10 +145,12 @@ export function MyListBlock({ action, courses, permalink, id }: MyListBlockProps
     // Un grupo con nombre: las tarjetas usan el suyo sin nombre (`group-hover`), y este las encendería todas a la vez.
     <div id={id} ref={block} tabIndex={-1} className="group/lista flex flex-col gap-3 outline-none">
       {courses.length === 0 && (
-        <p className={cx("px-4 text-body text-text-2 sm:px-8", arrived ? "block" : "hidden group-target/lista:block")}>{text.emptyHere}</p>
+        <div data-list-empty className={cx(offset, arrived ? "block" : "hidden group-target/lista:block")}>
+          <FlowerState title={text.emptyHereTitle}>{text.emptyHere}</FlowerState>
+        </div>
       )}
       {courses.length > 0 && (
-        <form ref={form} action={formAction} onSubmit={onSubmit}>
+        <form ref={form} action={formAction} onSubmit={onSubmit} className={offset}>
           <Carousel id="mi-lista" title={text.title}>
             {courses.map((course) => (
               <div key={course.slug} className="flex h-full flex-col items-start gap-3">

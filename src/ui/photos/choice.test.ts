@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { HOME_HEADER_PHOTOS, homeHeaderPhoto, PRACTICE_PHOTOS, practicePhoto } from "./choice";
+import { EXPLORE_HEADER_PHOTO, HOME_HEADER_PHOTO, PRACTICE_PHOTOS, practicePhoto } from "./choice";
+import { PHOTO_CREDITS } from "./credits";
 
 // Qué foto de ambiente lleva cada lugar (T-614, parte 4; decisiones de Sergio del 2026-11-05): el maestro sin
-// retrato, la de su primera práctica, siempre la misma por práctica; la cabecera del inicio, una por día,
-// alternadas e iguales para todos ese día.
+// retrato, la de su primera práctica, siempre la misma por práctica. Desde T-616 (solicitud 3, por el prototipo de la
+// dirección), la cabecera del inicio lleva siempre las estrellas y el faro va en la de explorar.
 
 describe("practicePhoto", () => {
   it("alterna las dos por el orden de la práctica en el catálogo", () => {
@@ -23,18 +24,17 @@ describe("practicePhoto", () => {
   });
 });
 
-describe("homeHeaderPhoto", () => {
-  // La Ciudad de México va seis horas detrás de UTC (sin horario de verano desde 2022).
-  const at = (iso: string) => new Date(iso);
+/** El archivo de una foto importada: en las pruebas, la importación da su dirección; en Next, un objeto con `src`. */
+const fileOf = (photo: unknown) => String(typeof photo === "string" ? photo : (photo as { src: string }).src).split("/").pop()?.split("?")[0];
 
-  it("alterna entre un día y el siguiente", () => {
-    expect(HOME_HEADER_PHOTOS).toHaveLength(2);
-    expect(homeHeaderPhoto(at("2026-11-05T18:00:00Z"))).not.toBe(homeHeaderPhoto(at("2026-11-06T18:00:00Z")));
-    expect(homeHeaderPhoto(at("2026-11-05T18:00:00Z"))).toBe(homeHeaderPhoto(at("2026-11-07T18:00:00Z")));
-  });
-
-  it("es la misma todo el día en la Ciudad de México, también después de las seis de la tarde", () => {
-    // 2026-11-05 a las 00:30 y a las 23:30 de la Ciudad de México: el segundo ya es 2026-11-06 en UTC.
-    expect(homeHeaderPhoto(at("2026-11-05T06:30:00Z"))).toBe(homeHeaderPhoto(at("2026-11-06T05:30:00Z")));
+// Revisión del carril A de la 3a: la prueba de antes solo comparaba que fueran distintas. Ahora, cuál es cada una y dónde la
+// registra el registro de créditos.
+describe("las cabeceras", () => {
+  it.each([
+    ["el inicio", HOME_HEADER_PHOTO, "inicio-estrellas.jpg", "inicio"],
+    ["explorar", EXPLORE_HEADER_PHOTO, "explorar-faro.jpg", "explorar"],
+  ] as const)("%s lleva su foto, registrada para su lugar", (_, photo, file, place) => {
+    expect(fileOf(photo)).toBe(file);
+    expect(PHOTO_CREDITS.find((credit) => credit.file === file)?.place).toBe(place);
   });
 });
