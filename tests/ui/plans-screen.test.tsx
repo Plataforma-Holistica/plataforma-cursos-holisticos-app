@@ -11,8 +11,10 @@ vi.mock("@/app/planes/actions", () => actions);
 
 import { PlansScreen } from "@/app/planes/screen";
 import { plansView, type PlansViewer } from "@/app/planes/view";
+import { plans as text } from "@/messages/es/plans";
+import { t } from "@/messages/format";
 import { resolveDestination, signInPath, signUpPath } from "@/services/account/navigation";
-import type { Offer } from "@/services/billing/checkout";
+import type { CheckoutPlan, Offer } from "@/services/billing/checkout";
 
 import { a11yViolations } from "../setup/a11y";
 
@@ -39,18 +41,8 @@ beforeEach(() => {
 });
 
 describe("PA-04", () => {
-  it("lo que incluye es una lista de lo que ya existe, sin prometer constancias (T-616, solicitud 4)", () => {
-    show(null);
-    // Sin contar planes: con uno solo a la venta, «los dos» sería falso.
-    const list = screen.getByRole("list", { name: "Cualquier plan incluye:" });
-    expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
-      "Todo el catálogo",
-      // Sin ambigüedad (pedido del carril A del 2026-11-12): son sus cursos, no un trato con ellos; y no todo curso trae recursos.
-      "Los cursos de todos los maestros",
-      "Los recursos de los cursos que los traen",
-    ]);
-    expect(document.body.textContent).not.toMatch(/constancia/i);
-  });
+  // Cambió por el requisito (T-616, 3b-4): lo que incluye sube a la cabecera de la página (`page.tsx`), con el título; su prueba
+  // pasa a tests/ui/plans-page.test.tsx.
 
   it("sin elegir: los dos planes con su precio e «IVA incluido», y sin formulario; sin fallas de accesibilidad", async () => {
     const { container } = show(null);
@@ -143,5 +135,97 @@ describe("PA-04", () => {
     show("monthly", { kind: "in_progress", session: "cs_test_1" });
     expect(screen.getByRole("link", { name: "Ver cómo va" })).toHaveAttribute("href", "/suscripcion/confirmando?sesion=cs_test_1");
     expect(screen.queryByRole("button", { name: "Continuar al pago" })).not.toBeInTheDocument();
+  });
+});
+
+// T-616, 3b-4: el anual destacado («Conviene más» y su ahorro). Destacado no es elegido: elegido lleva el contorno y «Plan elegido»;
+// destacado, el antetítulo, la cifra y, sin plan elegido, el botón principal. El antetítulo y la cifra se leen, pero no entran al
+// nombre del encabezado ni al del botón. Los textos salen de los mensajes: si cambian, la prueba no.
+describe("PA-04, el anual destacado (T-616, 3b-4)", () => {
+  // 12 × $349.00 − $3,490.00 = $698.
+  const SAVING = t(text.saving, { saving: "$698" });
+  const cardOf = (name: string) => screen.getByRole("heading", { level: 3, name }).closest("li") as HTMLElement;
+  const chooseOf = (plan: "Mensual" | "Anual") => screen.getByRole("link", { name: `Elegir el plan ${plan}` });
+
+  it("sin elegir: el anual con «Conviene más», su ahorro y el botón principal; el mensual, secundario", async () => {
+    const { container } = show(null);
+    const annual = cardOf("Anual");
+    const monthly = cardOf("Mensual");
+    expect(within(annual).getByText(text.featured)).toBeInTheDocument();
+    expect(within(annual).getByText(SAVING)).toBeInTheDocument();
+    expect(within(monthly).queryByText(text.featured)).toBeNull();
+    expect(within(monthly).queryByText(SAVING)).toBeNull();
+    // El antetítulo va antes del encabezado, fuera de él.
+    const eyebrow = within(annual).getByText(text.featured);
+    expect(eyebrow.compareDocumentPosition(within(annual).getByRole("heading")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(chooseOf("Anual")).toHaveClass("bg-accent");
+    expect(chooseOf("Mensual")).not.toHaveClass("bg-accent");
+    // Destacado no es elegido: sin contorno del acento ni «Plan elegido».
+    expect(annual).not.toHaveClass("border-accent");
+    expect(screen.queryByText(text.chosen)).toBeNull();
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("con el mensual elegido: el mensual con el estilo de elegido; el anual destacado, con su botón en secundario", async () => {
+    const { container } = show("monthly");
+    expect(cardOf("Mensual")).toHaveClass("border-accent");
+    expect(within(cardOf("Mensual")).getByText(text.chosen)).toHaveAttribute("aria-current", "true");
+    const annual = cardOf("Anual");
+    expect(annual).not.toHaveClass("border-accent");
+    expect(within(annual).getByText(text.featured)).toBeInTheDocument();
+    expect(within(annual).getByText(SAVING)).toBeInTheDocument();
+    // Un solo principal: «Continuar al pago».
+    expect(chooseOf("Anual")).not.toHaveClass("bg-accent");
+    const cards = screen.getByRole("region", { name: text.choose });
+    expect(within(cards).queryAllByRole("link").filter((link) => link.classList.contains("bg-accent"))).toEqual([]);
+    expect(screen.getByRole("button", { name: "Continuar al pago" })).toHaveClass("bg-accent");
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("con el anual elegido: el anual con el estilo de elegido, su antetítulo y su ahorro; el mensual, secundario", async () => {
+    const { container } = show("annual");
+    const annual = cardOf("Anual");
+    expect(annual).toHaveClass("border-accent");
+    expect(within(annual).getByText(text.chosen)).toHaveAttribute("aria-current", "true");
+    expect(within(annual).getByText(text.featured)).toBeInTheDocument();
+    expect(within(annual).getByText(SAVING)).toBeInTheDocument();
+    expect(chooseOf("Mensual")).not.toHaveClass("bg-accent");
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("el ahorro nunca entra en «Antes de pagar» ni en el formulario, que lleva lo de siempre", async () => {
+    actions.startCheckoutAction.mockResolvedValue({ kind: "answer", answer: "changed", plan: "annual", attempt: 1 });
+    const { user, container } = show("annual");
+    const pay = container.querySelector("#bloque-pagar") as HTMLElement;
+    expect(pay.textContent).not.toContain(SAVING);
+    expect(pay.textContent).not.toContain(text.featured);
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: "Continuar al pago" }));
+    expect(Object.fromEntries(actions.startCheckoutAction.mock.calls[0]?.[1] as FormData)).toEqual({ plan: "annual", monto: "349000", texto: DOC, acepto: "on" });
+  });
+
+  it("sin ahorro, ni antetítulo, ni cifra, ni botón principal en las tarjetas", () => {
+    const offer: Offer = { ...OFFER, plans: OFFER.plans.map((each) => (each.plan === "annual" ? { ...each, amountCents: 418800 } : each)) };
+    const view = plansView(offer, { plan: null, returnTo: null, canceled: false }, { kind: "pay" }, legal);
+    if (view.kind !== "ready") throw new Error("se vende");
+    render(<PlansScreen view={view} />);
+    expect(screen.queryByText(text.featured)).toBeNull();
+    expect(screen.queryByText(/Ahorras/)).toBeNull();
+    expect(chooseOf("Anual")).not.toHaveClass("bg-accent");
+    expect(chooseOf("Mensual")).not.toHaveClass("bg-accent");
+  });
+
+  it("una cifra de siete dígitos sale entera, y la frase puede partirse en renglones (320 px)", () => {
+    // 12 × $1,000,000.00 − $10,765,433.00 = $1,234,567.
+    const plans: { plan: CheckoutPlan; amountCents: number }[] = [
+      { plan: "monthly", amountCents: 100_000_000 },
+      { plan: "annual", amountCents: 1_076_543_300 },
+    ];
+    const offer: Offer = { ...OFFER, plans: plans.map((each) => ({ ...each, lookupKey: "x", nextChargeAt: "2026-12-10T18:00:00Z" })) };
+    const view = plansView(offer, { plan: null, returnTo: null, canceled: false }, { kind: "pay" }, legal);
+    if (view.kind !== "ready") throw new Error("se vende");
+    render(<PlansScreen view={view} />);
+    const line = screen.getByText(t(text.saving, { saving: "$1,234,567" }));
+    expect(line.className).not.toMatch(/truncate|whitespace-nowrap|line-clamp|overflow-hidden/);
   });
 });

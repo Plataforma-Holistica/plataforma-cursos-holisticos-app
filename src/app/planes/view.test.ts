@@ -1,7 +1,9 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import type { Offer } from "@/services/billing/checkout";
+import { plans as text } from "@/messages/es/plans";
+import { t } from "@/messages/format";
+import type { CheckoutPlan, Offer } from "@/services/billing/checkout";
 
 import { planCardText, plansView, showcaseView, type PlansViewer } from "./view";
 
@@ -92,8 +94,21 @@ describe("la vitrina de la portada (T-616, solicitud 4b)", () => {
         const shown = showcaseView({ kind: "ready", plans, recurringVersion: OFFER.recurring!.version }, legal);
         const page = plansView(offer, { plan: null, returnTo: null, canceled: false }, PAY, legal);
         if (shown.kind !== "ready" || page.kind !== "ready") return false;
-        const pick = (card: { plan: string; name: string; price: string; repeat: string; equivalent: string | null; href: string; chooseLabel: string }) => ({
+        // T-616, 3b-4: también el ahorro y el destacado, que la portada y /planes calculan con la misma función.
+        const pick = (card: {
+          plan: string;
+          name: string;
+          price: string;
+          repeat: string;
+          equivalent: string | null;
+          featured: boolean;
+          saving: string | null;
+          href: string;
+          chooseLabel: string;
+        }) => ({
           plan: card.plan,
+          featured: card.featured,
+          saving: card.saving,
           name: card.name,
           price: card.price,
           repeat: card.repeat,
@@ -142,5 +157,96 @@ describe("la vitrina de la portada (T-616, solicitud 4b)", () => {
 
   it("si no se supo, sin cifras", () => {
     expect(showcaseView({ kind: "unavailable" }, legal)).toEqual({ kind: "unavailable" });
+  });
+});
+
+// T-616, 3b-4: el anual destacado con su ahorro, por la misma función en /planes y en la portada. La marca no sale sin la cifra, ni
+// la cifra sin la marca; destacar no elige ni entra en lo que se firma.
+describe("el anual destacado y su ahorro (T-616, 3b-4)", () => {
+  const offerOf = (plans: { plan: CheckoutPlan; amountCents: number }[]): Offer => ({
+    ...OFFER,
+    plans: plans.map((each) => ({ ...each, lookupKey: "x", nextChargeAt: "2026-12-10T18:00:00Z" })),
+  });
+  const ready = (offer: Offer, plan: CheckoutPlan | null = null) => {
+    const view = plansView(offer, { plan, returnTo: null, canceled: false }, PAY, legal);
+    if (view.kind !== "ready") throw new Error("lista");
+    return view;
+  };
+  const SEED = [
+    { plan: "monthly" as const, amountCents: 34900 },
+    { plan: "annual" as const, amountCents: 299000 },
+  ];
+
+  it("con los precios de la semilla, el anual dice que ahorras $1,198 al año frente a doce meses del mensual", () => {
+    const view = ready(offerOf(SEED));
+    expect(view.cards.map((card) => [card.plan, card.featured, card.saving])).toEqual([
+      ["monthly", false, null],
+      ["annual", true, t(text.saving, { saving: "$1,198" })],
+    ]);
+  });
+
+  it("la cifra sale de los montos de la oferta: con otros, otra", () => {
+    const view = ready(offerOf([{ plan: "monthly", amountCents: 39900 }, { plan: "annual", amountCents: 399000 }]));
+    expect(view.cards[1]?.saving).toBe(t(text.saving, { saving: "$798" }));
+  });
+
+  it("los planes se buscan por nombre, no por su lugar", () => {
+    const view = ready(offerOf([...SEED].reverse()));
+    expect(view.cards.map((card) => [card.plan, card.featured])).toEqual([
+      ["annual", true],
+      ["monthly", false],
+    ]);
+    expect(view.cards[0]?.saving).toBe(t(text.saving, { saving: "$1,198" }));
+  });
+
+  it("sin ahorro, ningún destacado ni cifra: igual o más caro, menos de un peso, un solo plan o un plan repetido", () => {
+    for (const plans of [
+      [{ plan: "monthly" as const, amountCents: 34900 }, { plan: "annual" as const, amountCents: 418800 }],
+      [{ plan: "monthly" as const, amountCents: 34900 }, { plan: "annual" as const, amountCents: 500000 }],
+      [{ plan: "monthly" as const, amountCents: 34900 }, { plan: "annual" as const, amountCents: 418701 }],
+      [{ plan: "annual" as const, amountCents: 299000 }],
+      [{ plan: "monthly" as const, amountCents: 34900 }],
+      [...SEED, { plan: "annual" as const, amountCents: 199000 }],
+    ]) {
+      const view = ready(offerOf(plans));
+      expect(view.cards.every((card) => !card.featured && card.saving === null && !card.primary), JSON.stringify(plans)).toBe(true);
+      const shown = showcaseView({ kind: "ready", plans, recurringVersion: 0 }, legal);
+      expect(shown.kind === "ready" && shown.cards.every((card) => !card.featured && card.saving === null), JSON.stringify(plans)).toBe(true);
+    }
+  });
+
+  it("la marca va siempre con su cifra, solo en el anual (propiedad)", () => {
+    const plan = fc.record({ plan: fc.constantFrom("monthly" as const, "annual" as const), amountCents: fc.integer({ min: 1, max: 999_999_999_999 }) });
+    fc.assert(
+      fc.property(fc.array(plan, { minLength: 1, maxLength: 3 }), (plans) => {
+        const view = ready(offerOf(plans));
+        return view.cards.every((card) => card.featured === (card.saving !== null) && (!card.featured || card.plan === "annual"));
+      }),
+    );
+  });
+
+  it("el botón principal es el del anual destacado solo sin plan elegido: elegido uno, la acción principal es pagar", () => {
+    expect(ready(offerOf(SEED)).cards.map((card) => card.primary)).toEqual([false, true]);
+    expect(ready(offerOf(SEED), "monthly").cards.map((card) => card.primary)).toEqual([false, false]);
+    expect(ready(offerOf(SEED), "annual").cards.map((card) => card.primary)).toEqual([false, false]);
+  });
+
+  it("destacar no elige: sin plan en la dirección no hay «Antes de pagar», y con plan lo que se firma no lleva el ahorro", () => {
+    expect(ready(offerOf(SEED)).summary).toBeNull();
+    for (const plan of ["monthly", "annual"] as const) {
+      const summary = ready(offerOf(SEED), plan).summary;
+      expect(summary?.plan).toBe(plan);
+      expect(JSON.stringify(summary)).not.toMatch(/1,198|1198|Ahorras/);
+    }
+  });
+
+  it("en la portada, el anual destacado con su cifra, sin botón principal: ahí el principal es «Suscribirme»", () => {
+    const shown = showcaseView({ kind: "ready", plans: SEED, recurringVersion: 0 }, legal);
+    if (shown.kind !== "ready") throw new Error("lista");
+    expect(shown.cards.map((card) => [card.plan, card.featured, card.saving])).toEqual([
+      ["monthly", false, null],
+      ["annual", true, t(text.saving, { saving: "$1,198" })],
+    ]);
+    expect(shown.cards.some((card) => "primary" in card)).toBe(false);
   });
 });

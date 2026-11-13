@@ -133,4 +133,23 @@ describe("los precios de la portada", () => {
     const priced = messages.filter((file) => /\$\s?\d/.test(readFileSync(join(ROOT, file), "utf8")));
     expect(priced).toEqual([]);
   });
+
+  // T-616, 3b-4: el ahorro del anual es publicidad sobre el precio (LF-47). La cifra la calcula `annualSaving` de los montos de la base;
+  // la plantilla solo dice dónde va, sin ninguna cifra escrita («2 meses gratis», «1,198 pesos»), y nadie fuera de los planes la calcula
+  // aparte: la portada la recibe por `showcaseView`.
+  it("el ahorro del anual no escribe ninguna cifra: su plantilla lleva el lugar de la cifra y ningún dígito", () => {
+    // El texto tal como está escrito en el catálogo (la plantilla ya armada es un objeto).
+    const source = readFileSync(join(ROOT, "src/messages/es/plans.ts"), "utf8");
+    const saving = /^\s*saving: "([^"]*)",$/m.exec(source)?.[1];
+    const featured = /^\s*featured: "([^"]*)",$/m.exec(source)?.[1];
+    expect(saving).toContain("{saving}");
+    expect(saving).not.toMatch(/\d/);
+    expect(featured).toBeDefined();
+    expect(featured).not.toMatch(/\d/);
+  });
+
+  it("solo los planes calculan el ahorro", () => {
+    const named = sources.filter(({ file, text }) => /\bannualSaving\s*\(/.test(text) && !/\.test\.tsx?$/.test(file)).map(({ file }) => file);
+    expect(named.sort()).toEqual(["src/app/planes/outcomes.ts", "src/app/planes/view.ts"]);
+  });
 });

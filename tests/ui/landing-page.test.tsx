@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { a11yViolations } from "../setup/a11y";
 
 import { landing } from "@/messages/es/landing";
+import { plans } from "@/messages/es/plans";
+import { t } from "@/messages/format";
 import { terms } from "@/messages/es/terms";
 import type { HomeShelf, ShelfCourse } from "@/services/browse/browse";
 
@@ -129,7 +131,40 @@ describe("la portada (PA-01)", () => {
     expect(within(section).getByRole("link", { name: "Elegir el plan Mensual" })).toHaveAttribute("href", "/planes?plan=monthly#bloque-pagar");
     expect(within(section).getByRole("link", { name: "Elegir el plan Anual" })).toHaveAttribute("href", "/planes?plan=annual#bloque-pagar");
     expect(within(section).getByRole("list", { name: "Cualquier plan incluye:" })).toBeInTheDocument();
-    expect(within(section).getByRole("link", { name: landing.plans.seeAll })).toHaveAttribute("href", "/planes");
+    // Cambió por el requisito (T-616, 3b-4): con tarjetas, «Ver planes» sobra; cada tarjeta lleva a su plan. Sigue cuando no se pudieron
+    // leer los precios (abajo).
+    expect(within(section).queryByRole("link", { name: landing.plans.seeAll })).toBeNull();
+  });
+
+  // T-616, 3b-4: la misma jerarquía y la misma cifra que /planes, por la misma función. Aquí el anual va en secundario: el principal de la
+  // página es «Suscribirme» (decisión del carril A del 2026-11-13, sin confirmar por Sergio).
+  it("el anual con «Conviene más» y lo que ahorra, en secundario; el mensual sin nada de eso; sin fallas de accesibilidad", async () => {
+    const container = await renderPage();
+    const section = screen.getByRole("region", { name: landing.plans.title });
+    const annual = within(section).getByRole("heading", { level: 3, name: "Anual" }).closest("li") as HTMLElement;
+    const monthly = within(section).getByRole("heading", { level: 3, name: "Mensual" }).closest("li") as HTMLElement;
+    // 12 × $349.00 − $2,990.00 = $1,198.
+    expect(within(annual).getByText(plans.featured)).toBeInTheDocument();
+    expect(within(annual).getByText(t(plans.saving, { saving: "$1,198" }))).toBeInTheDocument();
+    expect(within(monthly).queryByText(plans.featured)).toBeNull();
+    expect(within(monthly).queryByText(/Ahorras/)).toBeNull();
+    for (const link of within(section).getAllByRole("link", { name: /^Elegir el plan/ })) expect(link).not.toHaveClass("bg-accent");
+    expect(within(section).getByRole("link", { name: "Elegir el plan Anual" })).toHaveAttribute("href", "/planes?plan=annual#bloque-pagar");
+    expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  it("sin ahorro, ni «Conviene más» ni cifra", async () => {
+    mocks.planShowcase.mockResolvedValue({
+      ...ON_SALE,
+      plans: [
+        { plan: "monthly", amountCents: 34900 },
+        { plan: "annual", amountCents: 418800 },
+      ],
+    });
+    await renderPage();
+    const section = screen.getByRole("region", { name: landing.plans.title });
+    expect(within(section).queryByText(plans.featured)).toBeNull();
+    expect(within(section).queryByText(/Ahorras/)).toBeNull();
   });
 
   it("con un solo plan a la venta, una tarjeta", async () => {

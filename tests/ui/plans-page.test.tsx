@@ -106,3 +106,39 @@ describe("PA-04, cuando no se venden planes", () => {
     expect(screen.getByRole("link", { name: "Reintentar" })).toBeInTheDocument();
   });
 });
+
+// T-616, 3b-4: la cabecera del rediseño (`PageHeader`), sin foto y sin antetítulo; el título y lo que incluye cualquier plan van en
+// ella, vendan o no. La prueba de lo que incluye vino de tests/ui/plans-screen.test.tsx: subió con la cabecera.
+describe("PA-04, la cabecera (T-616, 3b-4)", () => {
+  it("con planes: el título y lo que incluye, dentro de la cabecera, sin foto; la lista solo con lo que ya existe", async () => {
+    mocks.publicViewer.mockResolvedValue({ kind: "visitor" });
+    mocks.planOffer.mockResolvedValue(SALE);
+    const { container } = await page({});
+    const header = container.querySelector("[data-page-header]") as HTMLElement;
+    expect(header).not.toBeNull();
+    expect(header).toContainElement(screen.getByRole("heading", { level: 1, name: "Elige tu plan" }));
+    expect(header.querySelector("img")).toBeNull();
+    expect(header.querySelector(".eyebrow")).toBeNull();
+    // Sin contar planes: con uno solo a la venta, «los dos» sería falso.
+    const list = screen.getByRole("list", { name: "Cualquier plan incluye:" });
+    expect(header).toContainElement(list);
+    expect(Array.from(list.querySelectorAll("li")).map((item) => item.textContent)).toEqual([
+      "Todo el catálogo",
+      // Sin ambigüedad (pedido del carril A del 2026-11-12): son sus cursos, no un trato con ellos; y no todo curso trae recursos.
+      "Los cursos de todos los maestros",
+      "Los recursos de los cursos que los traen",
+    ]);
+    expect(document.body.textContent).not.toMatch(/constancia/i);
+    // Lo demás, fuera de la cabecera.
+    expect(header).not.toContainElement(screen.getByText("planes"));
+  });
+
+  it("sin venta, la misma cabecera con el título, y el aviso fuera de ella", async () => {
+    mocks.publicViewer.mockResolvedValue({ kind: "visitor" });
+    mocks.planOffer.mockResolvedValue(NOT_FOR_SALE);
+    const { container } = await page({});
+    const header = container.querySelector("[data-page-header]") as HTMLElement;
+    expect(header).toContainElement(screen.getByRole("heading", { level: 1, name: "Elige tu plan" }));
+    expect(header).not.toContainElement(screen.getByText("Por ahora no se pueden contratar planes. Vuelve pronto."));
+  });
+});
