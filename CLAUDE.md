@@ -1413,8 +1413,8 @@ que no se ve leyendo un solo archivo:
   enlaces, también la lista de abajo en el teléfono) y «Tu cuenta y accesos» (los accesos por rol y el menú de la persona). **La llegada a
   Mi lista** (`my-list-block.tsx`) toma el foco al montarse solo si la dirección trae su ancla y además hay una marca de un solo uso que deja
   el clic de la barra (`takeArrival()`, en la memoria del módulo de `my-list-link.tsx`, de cliente) o es la primera carga del documento
-  y no fue una recarga (`performance.getEntriesByType("navigation")`, cada entrada una sola vez): así una navegación nativa antes de
-  hidratar también llega, y recargar o «Atrás» no. La marca se consume al montarse, haya ancla o no. Con Ctrl, Cmd, Shift, Alt o otro botón,
+  y fue una navegación (`navigate` en `performance.getEntriesByType("navigation")`, cada entrada una sola vez): así una navegación
+  nativa antes de hidratar también llega, y recargar o «Atrás» (también sin la caché de ida y vuelta) no. La marca se consume al montarse, haya ancla o no. Con Ctrl, Cmd, Shift, Alt u otro botón,
   el clic no avisa ni marca. **`FlowerState`** ganó `titleLevel` (1 a 3; sin él, el párrafo de siempre) y `live` (si es región viva; por
   omisión sigue a `waiting`); `PaywallState` pinta su título como `h2`. **El velo de `PageHeader`** es de 75 % hasta el 80 % del alto, de
   modo que todo su texto (también el antetítulo en oro de la alta en el teléfono) pasa 4.5 en el peor caso con el resplandor encima;
