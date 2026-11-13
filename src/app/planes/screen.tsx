@@ -45,7 +45,7 @@ export function PlansScreen({ view }: { view: Ready }) {
         </h2>
         <ul className="grid gap-4 sm:grid-cols-2">
           {view.cards.map((card) => (
-            <PlanOption key={card.plan} card={card} />
+            <PlanOption key={card.plan} card={card} level={view.cards.some((each) => each.featured) && !card.featured} />
           ))}
         </ul>
       </section>
@@ -59,9 +59,17 @@ export function PlansScreen({ view }: { view: Ready }) {
  * antetítulo, la cifra y, sin plan elegido, el botón principal. Los dos se suman sin confundirse. El antetítulo va antes del `<h3>` y
  * fuera de él: se lee, pero el nombre del encabezado y el del botón siguen siendo los del plan.
  */
-function PlanOption({ card }: { card: PlanCard }) {
+function PlanOption({ card, level }: { card: PlanCard; level: boolean }) {
   return (
-    <li className={cx("flex flex-col gap-3 rounded-md border p-6", card.chosen ? "border-accent bg-surface-2" : "border-border bg-surface-1")}>
+    <li
+      className={cx(
+        "flex flex-col gap-3 rounded-md border p-6",
+        card.chosen ? "border-accent bg-surface-2" : "border-border bg-surface-1",
+        // Lado a lado (desde `sm`), la que no lleva antetítulo baja su contenido lo que mide el antetítulo con su espacio (24 + 12 px),
+        // para que los títulos queden a la misma altura: solo disposición, sin nada que se lea (`portada.spec.ts` lo mide).
+        level && "sm:pt-15",
+      )}
+    >
       <PlanCardBody card={card} />
       <div className="mt-auto pt-2">
         {card.chosen ? (

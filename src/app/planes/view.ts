@@ -145,8 +145,10 @@ export function plansView(offer: Offer, query: PlansQuery, viewer: PlansViewer, 
       href: `${plansHref(each.plan, query.returnTo)}#${PAY_BLOCK_ID}`,
       chooseLabel: t(text.chooseThis, { plan: each.plan === "monthly" ? text.monthly : text.annual }),
       chosen: each.plan === query.plan,
-      // Destacar no elige: sin `?plan=` no hay «Antes de pagar», y con un plan elegido el principal es pagar.
-      primary: each.featured && query.plan === null,
+      // Destacar no elige: sin `?plan=` no hay «Antes de pagar», y con un plan elegido el principal es pagar. Solo a quien puede pagar
+      // (o crear su cuenta para hacerlo): con un pago en confirmación o con acceso, el aviso dice que no vuelva a pagar, y un botón en
+      // oro lo contradiría (revisión del carril A sobre de38193). El antetítulo y la cifra se quedan.
+      primary: each.featured && query.plan === null && (viewer.kind === "pay" || viewer.kind === "visitor"),
     }),
   );
 
