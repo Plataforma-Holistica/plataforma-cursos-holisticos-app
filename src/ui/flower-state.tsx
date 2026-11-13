@@ -14,13 +14,24 @@ import { SeedMark } from "./flower";
 //
 // `size="compact"` (T-616, solicitud 3) es el de un lugar chico, como el del reproductor (PA-33): la semilla más chica y menos
 // aire, para que quepa en un 16:9 del teléfono.
+//
+// Desde la 3b-1:
+// - `titleLevel` pinta el título como encabezado de ese nivel (PA-33 en la lección, un `h2`; PA-32, el `h1`). Sin él, un
+//   párrafo, como siempre. Es un número y no el nombre de la etiqueta: el lint no deja texto a mano en una prop nueva.
+// - La semilla de espera (`waiting`) ya no obliga a la región viva: `live` la decide, y por omisión sigue a `waiting`, como
+//   antes. Dentro de una región que ya existe (PA-32 envuelve la pantalla en la suya) va `live={false}`: no se anidan dos.
 
 export interface FlowerStateProps {
   title: string;
   children?: ReactNode;
   /** El botón o el enlace de lo que se puede hacer. */
   action?: ReactNode;
+  /** La semilla de espera, más callada. */
   waiting?: boolean;
+  /** Si es una región de estado (`role="status"`). Por omisión, la espera lo es. */
+  live?: boolean;
+  /** El nivel del título como encabezado; sin él, un párrafo. */
+  titleLevel?: 1 | 2 | 3;
   size?: "regular" | "compact";
   className?: string;
 }
@@ -30,11 +41,14 @@ const BOX = { regular: "gap-4 px-6 py-12", compact: "gap-2 px-4 py-4" } as const
 const SEED = { regular: "size-24", compact: "size-12" } as const;
 const TITLE = { regular: "text-h3", compact: "text-body-l font-semibold" } as const;
 
-export function FlowerState({ title, children, action, waiting = false, size = "regular", className }: FlowerStateProps) {
+const HEADINGS = { 1: "h1", 2: "h2", 3: "h3" } as const;
+
+export function FlowerState({ title, children, action, waiting = false, live = waiting, titleLevel, size = "regular", className }: FlowerStateProps) {
+  const Title = titleLevel === undefined ? "p" : HEADINGS[titleLevel];
   return (
-    <div role={waiting ? "status" : undefined} className={cx("flex flex-col items-center text-center", BOX[size], className)}>
+    <div role={live ? "status" : undefined} className={cx("flex flex-col items-center text-center", BOX[size], className)}>
       <SeedMark waiting={waiting} className={SEED[size]} />
-      <p className={cx("font-display text-text", TITLE[size])}>{title}</p>
+      <Title className={cx("font-display text-text", TITLE[size])}>{title}</Title>
       {children !== undefined && <div className="max-w-reading text-body text-text-2">{children}</div>}
       {action}
     </div>

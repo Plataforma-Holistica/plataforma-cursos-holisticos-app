@@ -40,7 +40,11 @@ export function PageHeader({ title, eyebrow, lead, photo, size = "regular", chil
           <Image src={photo} alt="" fill loading="eager" fetchPriority="high" sizes="(min-width: 1440px) 1440px, 100vw" className="object-cover" />
           <span
             aria-hidden="true"
-            className={cx("absolute inset-0", hero ? "bg-linear-to-t from-bg via-bg/70 to-bg/10" : "bg-linear-to-b from-bg/70 via-bg/75 to-bg")}
+            // El velo, lo justo para que la entradilla en `text-2` pase 4.5 sobre un píxel blanco de la foto (3b-1; medido en
+            // tests/design/contrast.test.ts, que lee estas clases): a 75 % da 4.93 (a 70 % daba 4.09). En la normal, de 75 % arriba
+            // al fondo pleno abajo; en la alta, del fondo abajo a 75 % a la mitad, sobre la que queda todo su texto, y arriba la
+            // foto se ve.
+            className={cx("absolute inset-0", hero ? "bg-linear-to-t from-bg via-bg/75 to-bg/10" : "bg-linear-to-b from-bg/75 to-bg")}
           />
         </>
       )}

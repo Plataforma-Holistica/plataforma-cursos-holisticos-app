@@ -59,6 +59,30 @@ describe("la flor de la vida (T-616)", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Preparando tu video");
   });
 
+  // T-616, 3b-1: el título puede ser un encabezado (PA-33 en la lección, PA-32), y la semilla de espera ya no obliga a una
+  // región viva: dentro de una que ya existe (PA-32) no se anidan dos.
+  it("el título va como párrafo por omisión, o como el encabezado que se pida", () => {
+    const { rerender } = render(<FlowerState title="Esta lección pide una suscripción" />);
+    expect(screen.queryByRole("heading")).toBeNull();
+    expect(screen.getByText("Esta lección pide una suscripción").tagName).toBe("P");
+    rerender(<FlowerState titleLevel={2} title="Esta lección pide una suscripción" />);
+    expect(screen.getByRole("heading", { level: 2, name: "Esta lección pide una suscripción" })).toBeInTheDocument();
+    rerender(<FlowerState titleLevel={1} title="Confirmando tu pago" />);
+    expect(screen.getByRole("heading", { level: 1, name: "Confirmando tu pago" })).toBeInTheDocument();
+  });
+
+  it("la semilla de espera va con su región viva por omisión, o sin ella si ya hay una alrededor", () => {
+    const { container, rerender } = render(<FlowerState waiting title="Preparando tu video" />);
+    const waitingSeed = container.querySelector("svg")?.innerHTML;
+    expect(screen.getByRole("status")).toHaveTextContent("Preparando tu video");
+    rerender(<FlowerState waiting live={false} title="Preparando tu video" />);
+    expect(screen.queryByRole("status")).toBeNull();
+    // La semilla es la de espera también sin la región.
+    expect(container.querySelector("svg")?.innerHTML).toBe(waitingSeed);
+    rerender(<FlowerState title="Preparando tu video" />);
+    expect(container.querySelector("svg")?.innerHTML).not.toBe(waitingSeed);
+  });
+
   it("un estado de pantalla completa sin icono lleva la semilla", () => {
     const { container } = render(
       <FullScreenState title="No encontramos esa página" primaryAction={<button type="button">Ir al inicio</button>} focusTitle={false}>

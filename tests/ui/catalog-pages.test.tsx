@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { terms } from "@/messages/es/terms";
 import { MOTIFS, motifFor } from "@/ui/motifs";
+import { TeacherCard } from "@/ui/teacher-card";
 
 import { a11yViolations } from "../setup/a11y";
 
@@ -348,6 +349,10 @@ describe("la ficha de un maestro (PA-03)", () => {
     const photo = container.querySelector("main header img");
     expect(photo).toHaveAttribute("alt", "");
     expect(photo?.getAttribute("src")).toMatch(/practica-/);
+    // La misma que su tarjeta: se elige por maestro (T-616, 3b-1).
+    const card = render(<TeacherCard href="/maestros/ana-robles" name="Ana Robles" practices={["Meditación"]} tone={3} practicePosition={1} />);
+    expect(card.container.querySelector("img")?.getAttribute("src")).toBe(photo?.getAttribute("src"));
+    card.unmount();
     unmount();
     mocks.teacherPage.mockResolvedValue({
       kind: "found",

@@ -6,19 +6,25 @@ import { ui } from "@/messages/es/ui";
 
 import { toneClasses } from "./course-cover";
 import { cx } from "./cx";
-import { practicePhoto } from "./photos/choice";
+import { teacherPhoto } from "./photos/choice";
 
 // Tarjeta de maestro (`TeacherCard`, diseño, sección 5.3; T-210), vertical 2:3 para el carrusel
-// «Por maestro». Mientras no haya retratos (PA-66), lleva la foto de ambiente de su primera práctica
-// (diseño, sección 3.12; T-614, parte 4), decorativa; sin práctica, la inicial sobre el tono neutro.
-// Debajo, el nombre y sus prácticas. Un solo enlace, con su nombre entero en un texto que solo se lee.
+// «Por maestro». Mientras no haya retratos (PA-66), lleva una foto de ambiente (diseño, sección 3.12; T-614,
+// parte 4), decorativa; sin práctica, la inicial sobre el tono neutro. Debajo, el nombre y sus prácticas. Un solo
+// enlace, con su nombre entero en un texto que solo se lee.
+//
+// Desde la 3b-1 la foto es la del maestro (`teacherPhoto`, por su slug), no la de su primera práctica: la misma que su
+// ficha. El slug sale de su enlace (`/maestros/<slug>`, `teacherPath`), para no cambiar las props de quien ya la usa.
+
+/** El slug de un maestro desde su enlace: el último tramo de la dirección. */
+const slugOf = (href: string) => href.split(/[?#]/u)[0]?.split("/").filter((part) => part !== "").pop() ?? href;
 
 export interface TeacherCardProps {
   href: string;
   name: string;
   practices: readonly string[];
   tone: number | null;
-  /** El orden en el catálogo de su primera práctica: elige su foto (`practicePhoto`). */
+  /** El orden en el catálogo de su primera práctica. Sin práctica (nulo), la inicial en lugar de la foto. */
   practicePosition: number | null;
   /** Desde T-616 (segunda vuelta; decisión del carril A sin confirmar, que cambia el 03 §4.3): `round`, el retrato en un círculo con un anillo fino de oro apagado, para la banda «Por maestro» del inicio. */
   shape?: "portrait" | "round";
@@ -29,7 +35,7 @@ export function TeacherCard({ href, name, practices, tone, practicePosition, sha
   const text = ui.teacherCard;
   const label = practices.length > 0 ? t(text.name, { name, practices: practices.join(", ") }) : t(text.nameWithoutPractices, { name });
   const initial = [...name.trim()][0]?.toUpperCase() ?? "";
-  const photo = practicePhoto(practicePosition);
+  const photo = practicePosition === null ? null : teacherPhoto(slugOf(href));
   if (shape === "round") {
     return (
       <Link href={href} className={cx("group flex flex-col items-center gap-4 rounded-lg p-2 text-center outline-offset-4", className)}>

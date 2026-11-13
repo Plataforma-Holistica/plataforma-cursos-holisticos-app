@@ -167,6 +167,22 @@ describe("contraste de los tokens (diseño, secciones 3.3 y 3.4)", () => {
     expect(value, "actualiza la tabla del diseño").toBe(9.78);
   });
 
+  // T-616, 3b-1 (decisión del carril A del 2026-11-12): en una cabecera con foto (`PageHeader`), la entradilla en `text-2`
+  // pasa 4.5 sobre el peor caso, un píxel blanco bajo el velo del fondo. El velo se lee de `page-header.tsx`: en la normal, lo
+  // más tenue de su degradado (arriba, donde va el texto); en la alta, su punto medio, sobre el que queda todo su texto (la
+  // foto se ve arriba, sin texto encima).
+  it.each([
+    ["normal", /bg-linear-to-b from-bg\/(\d+) to-bg/],
+    ["alta", /bg-linear-to-t from-bg via-bg\/(\d+) to-bg\/\d+/],
+  ] as const)("text-2 sobre una foto blanca con el velo de la cabecera %s", (_, veil) => {
+    const header = readFileSync(fileURLToPath(new URL("../../src/ui/page-header.tsx", import.meta.url)), "utf8");
+    const alpha = Number(header.match(veil)?.[1]) / 100;
+    expect(alpha, "el velo no está donde se busca").toBeGreaterThan(0);
+    const value = ratio(rgbOf("text-2"), mix(rgbOf("bg"), alpha, [255, 255, 255]));
+    expect(value).toBeGreaterThanOrEqual(AA_TEXT);
+    expect(value, "actualiza la tabla del diseño").toBe(4.93);
+  });
+
   it("text-3 es el texto más tenue: no hay un gris más claro que pase por texto", () => {
     const greys = ["text", "text-2", "text-3", "text-disabled"].map((token) => ratio(rgbOf(token), rgbOf("bg")));
     expect(greys).toEqual([...greys].sort((a, b) => b - a));
