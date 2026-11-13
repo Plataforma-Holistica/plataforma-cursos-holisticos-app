@@ -118,6 +118,11 @@ describe("la cabecera de pantalla (T-616)", () => {
     expect(screen.getByRole("heading", { level: 1 })).not.toHaveAttribute("tabindex");
   });
 
+  it("con `titleRef` nulo, el h1 tampoco se enfoca", () => {
+    render(<PageHeader title="Cuenta" titleRef={null} />);
+    expect(screen.getByRole("heading", { level: 1 })).not.toHaveAttribute("tabindex");
+  });
+
   it("lo de arriba (`above`, un «Volver a…») va dentro de la cabecera, antes del antetítulo y del título", () => {
     const { container } = render(<PageHeader above={<a href="/cuenta">Volver a Cuenta</a>} eyebrow="Cuenta" title="Mis comentarios" />);
     const header = container.querySelector("[data-page-header]");
@@ -126,6 +131,8 @@ describe("la cabecera de pantalla (T-616)", () => {
     const eyebrow = screen.getByText("Cuenta");
     expect(back.compareDocumentPosition(eyebrow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(eyebrow.compareDocumentPosition(screen.getByRole("heading", { level: 1 })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // En la columna de la cabecera, lo de arriba no se estira: el enlace mide su texto y no toda la fila.
+    expect(back.parentElement).toHaveClass("self-start");
   });
 });
 

@@ -36,6 +36,7 @@ export interface PageHeaderProps {
 
 export function PageHeader({ title, titleRef, above, eyebrow, lead, photo, size = "regular", children, className }: PageHeaderProps) {
   const hero = size === "hero";
+  const focusable = titleRef !== undefined && titleRef !== null;
   return (
     // La alta mide 368 px en computadora (T-616, solicitud 3: la cabecera del inicio a 360–380 px, para que el protagonista
     // quede en la primera pantalla) y 224 en el teléfono, con menos aire: a 390 × 844 el botón del protagonista cabe sin bajar.
@@ -69,12 +70,13 @@ export function PageHeader({ title, titleRef, above, eyebrow, lead, photo, size 
       {/* La entrada anima solo lo que acompaña al título: el `<h1>` se pinta de inmediato, porque suele ser lo más
           grande que se ve al llegar y arrancarlo invisible retrasaba su pintado (LCP) los 480 ms de la entrada. */}
       <div className={cx("relative mx-auto flex w-full max-w-page flex-col gap-3 px-4 sm:px-8", hero ? "pt-16 pb-8 sm:pt-24 sm:pb-16" : "pt-12 pb-10 sm:pt-24 sm:pb-14")}>
-        {above}
+        {/* No se estira en la columna: el enlace mide su texto, no toda la fila. */}
+        {above !== undefined && <div className="self-start">{above}</div>}
         {eyebrow !== undefined && <p className="animate-enter eyebrow text-accent">{eyebrow}</p>}
         <h1
           ref={titleRef}
-          tabIndex={titleRef === undefined ? undefined : -1}
-          className={cx("max-w-reading text-text", hero ? "text-display-xl" : "text-display-l", titleRef !== undefined && "outline-none")}
+          tabIndex={focusable ? -1 : undefined}
+          className={cx("max-w-reading text-text", hero ? "text-display-xl" : "text-display-l", focusable && "outline-none")}
         >
           {title}
         </h1>
