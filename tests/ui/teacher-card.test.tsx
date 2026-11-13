@@ -40,6 +40,21 @@ describe("TeacherCard", () => {
     expect(photos.size).toBeGreaterThan(1);
   });
 
+  // Revisión de la 3b-1: el slug llega como prop; sin él (la portada pública todavía no lo pasa), sale del enlace.
+  it("con `slug`, la foto sale de él y no del enlace", () => {
+    const srcOf = (props: { slug?: string; href: string }) => {
+      const { container, unmount } = render(<TeacherCard {...props} name="Ana" practices={["Yoga"]} tone={5} practicePosition={1} />);
+      const src = container.querySelector("img")?.getAttribute("src");
+      unmount();
+      return src;
+    };
+    const slugs = Array.from({ length: 20 }, (_, index) => `maestra-${index}`);
+    // Dos slugs con fotos distintas: el enlace de uno y el slug del otro.
+    const [first, other] = [slugs[0] ?? "", slugs.find((slug) => srcOf({ href: `/maestros/${slug}` }) !== srcOf({ href: `/maestros/${slugs[0]}` })) ?? ""];
+    expect(other).not.toBe("");
+    expect(srcOf({ slug: other, href: `/maestros/${first}` })).toBe(srcOf({ href: `/maestros/${other}` }));
+  });
+
   it("sin práctica, la inicial", () => {
     const { container } = render(<TeacherCard href="/maestros/beto" name="beto Luna" practices={[]} tone={null} practicePosition={null} />);
     expect(container.querySelector("img")).toBeNull();

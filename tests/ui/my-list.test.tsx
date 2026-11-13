@@ -2,7 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { MyListLink } from "@/app/_catalog/my-list-link";
+import { MyListLink, takeArrival } from "@/app/_catalog/my-list-link";
 import { MY_LIST_ARRIVAL } from "@/app/_catalog/my-list/arrival";
 import { MyListBlock, type ListCourse } from "@/app/_catalog/my-list/my-list-block";
 import type { ListState } from "@/app/_catalog/my-list/outcomes";
@@ -212,20 +212,23 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
   /** Lo que haría el navegador en dos cuadros: el foco del bloque espera uno. */
   const frames = () => act(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 
-  // Cambió por el requisito (T-616, 3b-1): antes, montarse con el ancla en la dirección bastaba para tomar el foco, también al
-  // recargar, sin que nadie llegara por la barra. Ahora solo toma el foco al llegar por la barra (la marca de un solo uso que
-  // deja «Mi lista»), o si alguien escribe el ancla a mano (`hashchange`).
-  it("al recargar con el ancla, sin haber llegado por la barra, no toma el foco", async () => {
-    window.history.replaceState(null, "", "/inicio#bloque-lista");
-    const { container } = render(page(vi.fn(), [A]));
-    await frames();
-    expect(container.querySelector("#bloque-lista")).not.toHaveFocus();
-    window.history.replaceState(null, "", "/");
-  });
+  /**
+   * Cómo cargó el documento, como lo diría `performance.getEntriesByType("navigation")`: una entrada nueva por prueba (el
+   * bloque recuerda la que ya usó). Con `null`, sin entrada: no se sabe. Devuelve con qué volver a la de antes.
+   */
+  function loadedBy(type: "navigate" | "reload" | "back_forward" | null): () => void {
+    const entries = type === null ? [] : [{ type }];
+    const original = Object.getOwnPropertyDescriptor(performance, "getEntriesByType");
+    Object.defineProperty(performance, "getEntriesByType", { configurable: true, writable: true, value: () => entries });
+    return () => {
+      if (original === undefined) Reflect.deleteProperty(performance, "getEntriesByType");
+      else Object.defineProperty(performance, "getEntriesByType", original);
+    };
+  }
 
-  it("al llegar por la barra desde otra pantalla toma el foco al montarse, una sola vez", async () => {
+  /** «Mi lista» pulsada en otra pantalla, que se va antes de que el bloque exista: deja la marca. */
+  async function arriveFromElsewhere() {
     const user = userEvent.setup();
-    // La barra en otra pantalla: se pulsa «Mi lista» y la pantalla se va antes de que el bloque exista.
     const other = render(
       <MyListLink href="/inicio#bloque-lista" className="">
         Mi lista
@@ -233,6 +236,53 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
     );
     await user.click(screen.getByRole("link", { name: "Mi lista" }));
     other.unmount();
+  }
+
+  // Cambió por el requisito (T-616, 3b-1, y la revisión de la 3b-1): antes, montarse con el ancla en la dirección bastaba para
+  // tomar el foco, también al recargar. Ahora, al montarse, solo con el ancla y además la marca de la barra (llegada dentro de
+  // la aplicación) o la primera carga del documento que no fue una recarga (llegada nativa, antes de hidratar). Y si alguien
+  // escribe el ancla a mano (`hashchange`).
+  it("al recargar con el ancla, sin haber llegado por la barra, no toma el foco", async () => {
+    takeArrival();
+    const restore = loadedBy("reload");
+    window.history.replaceState(null, "", "/inicio#bloque-lista");
+    const { container } = render(page(vi.fn(), [A]));
+    await frames();
+    expect(container.querySelector("#bloque-lista")).not.toHaveFocus();
+    window.history.replaceState(null, "", "/");
+    restore();
+  });
+
+  it("la primera carga del documento con el ancla, que no fue una recarga, toma el foco; el montaje siguiente, no", async () => {
+    takeArrival();
+    const restore = loadedBy("navigate");
+    window.history.replaceState(null, "", "/inicio#bloque-lista");
+    const first = render(page(vi.fn(), [A]));
+    await waitFor(() => expect(first.container.querySelector("#bloque-lista")).toHaveFocus(), { timeout: 3_000 });
+    first.unmount();
+    // La misma carga, otro montaje («Atrás» dentro de la aplicación), sin marca: no.
+    const again = render(page(vi.fn(), [A]));
+    await frames();
+    expect(again.container.querySelector("#bloque-lista")).not.toHaveFocus();
+    window.history.replaceState(null, "", "/");
+    restore();
+  });
+
+  it("sin saber cómo cargó el documento, con el ancla y sin marca, no toma el foco", async () => {
+    takeArrival();
+    const restore = loadedBy(null);
+    window.history.replaceState(null, "", "/inicio#bloque-lista");
+    const { container } = render(page(vi.fn(), [A]));
+    await frames();
+    expect(container.querySelector("#bloque-lista")).not.toHaveFocus();
+    window.history.replaceState(null, "", "/");
+    restore();
+  });
+
+  it("al llegar por la barra desde otra pantalla toma el foco al montarse, una sola vez", async () => {
+    const restore = loadedBy("reload");
+    await arriveFromElsewhere();
+    window.history.replaceState(null, "", "/inicio#bloque-lista");
     const first = render(page(vi.fn(), [A]));
     await waitFor(() => expect(first.container.querySelector("#bloque-lista")).toHaveFocus(), { timeout: 3_000 });
     first.unmount();
@@ -240,6 +290,22 @@ describe("el carrusel «Mi lista» del inicio (PA-20)", () => {
     const again = render(page(vi.fn(), [A]));
     await frames();
     expect(again.container.querySelector("#bloque-lista")).not.toHaveFocus();
+    window.history.replaceState(null, "", "/");
+    restore();
+  });
+
+  // Revisión de la 3b-1: la marca quedaba viva si el bloque no se montaba (la navegación se abandonó, o el inicio salió sin el
+  // bloque), y el siguiente inicio, al que se llegó por el logotipo o «Atrás», tomaba el foco.
+  it("una marca vieja y una llegada sin el ancla no toman el foco, y la marca se consume igual", async () => {
+    const restore = loadedBy("reload");
+    await arriveFromElsewhere();
+    window.history.replaceState(null, "", "/inicio");
+    const { container } = render(page(vi.fn(), [A]));
+    await frames();
+    expect(container.querySelector("#bloque-lista")).not.toHaveFocus();
+    expect(takeArrival()).toBe(false);
+    window.history.replaceState(null, "", "/");
+    restore();
   });
 
   it("si se escribe el ancla a mano en el inicio, toma el foco; si se quita, no", async () => {

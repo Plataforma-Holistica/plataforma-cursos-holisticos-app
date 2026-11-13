@@ -14,7 +14,8 @@ import { teacherPhoto } from "./photos/choice";
 // enlace, con su nombre entero en un texto que solo se lee.
 //
 // Desde la 3b-1 la foto es la del maestro (`teacherPhoto`, por su slug), no la de su primera práctica: la misma que su
-// ficha. El slug sale de su enlace (`/maestros/<slug>`, `teacherPath`), para no cambiar las props de quien ya la usa.
+// ficha. El slug llega como prop (`slug`); sin él, sale del enlace (`/maestros/<slug>`, `teacherPath`), para quien todavía
+// no lo pasa: la portada pública (`src/app/page.tsx`), que debe pasarlo.
 
 /** El slug de un maestro desde su enlace: el último tramo de la dirección. */
 const slugOf = (href: string) => href.split(/[?#]/u)[0]?.split("/").filter((part) => part !== "").pop() ?? href;
@@ -22,6 +23,8 @@ const slugOf = (href: string) => href.split(/[?#]/u)[0]?.split("/").filter((part
 export interface TeacherCardProps {
   href: string;
   name: string;
+  /** El maestro: elige su foto. Sin él, se saca del enlace. */
+  slug?: string;
   practices: readonly string[];
   tone: number | null;
   /** El orden en el catálogo de su primera práctica. Sin práctica (nulo), la inicial en lugar de la foto. */
@@ -31,11 +34,11 @@ export interface TeacherCardProps {
   className?: string;
 }
 
-export function TeacherCard({ href, name, practices, tone, practicePosition, shape = "portrait", className }: TeacherCardProps) {
+export function TeacherCard({ href, name, slug, practices, tone, practicePosition, shape = "portrait", className }: TeacherCardProps) {
   const text = ui.teacherCard;
   const label = practices.length > 0 ? t(text.name, { name, practices: practices.join(", ") }) : t(text.nameWithoutPractices, { name });
   const initial = [...name.trim()][0]?.toUpperCase() ?? "";
-  const photo = practicePosition === null ? null : teacherPhoto(slugOf(href));
+  const photo = practicePosition === null ? null : teacherPhoto(slug ?? slugOf(href));
   if (shape === "round") {
     return (
       <Link href={href} className={cx("group flex flex-col items-center gap-4 rounded-lg p-2 text-center outline-offset-4", className)}>

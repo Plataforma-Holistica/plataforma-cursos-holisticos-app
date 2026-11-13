@@ -283,6 +283,7 @@ export default async function HomePage() {
                       <li key={teacher.slug} className="relative w-36 shrink-0 snap-start sm:w-auto">
                         <TeacherCard
                           href={href}
+                          slug={teacher.slug}
                           name={teacher.name}
                           practices={teacher.practices}
                           tone={teacher.tone}

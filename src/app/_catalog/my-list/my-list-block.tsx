@@ -32,7 +32,8 @@ import type { ListState } from "./outcomes";
 // hay nada guardado lo dice, solo entonces: el inicio sin nada guardado sigue sin «Mi lista». La llegada la avisa
 // el enlace (`MY_LIST_ARRIVAL`) si el bloque ya está pintado, o la deja en una marca de un solo uso que el bloque consume
 // al montarse (`takeArrival`, 3b-1: montarse con el ancla en la dirección ya no basta, porque así tomaba el foco también
-// al recargar); y `hashchange`, para quien escribe el ancla a mano. Sin JavaScript, la nota sale por `:target`.
+// al recargar; ver el efecto de la llegada, abajo); y `hashchange`, para quien escribe el ancla a mano. Sin JavaScript, la
+// nota sale por `:target`.
 //
 // Desde T-616 (solicitud 3), la nota es un estado con la flor (`FlowerState`), y el aire de arriba lo pone quien lo usa en lo
 // que se ve (`offset`): el bloque está siempre, también vacío, y no debe sumar aire si no muestra nada. La práctica de cada
@@ -64,6 +65,23 @@ export interface MyListBlockProps {
 }
 
 const removeValue = (slug: string) => `remove:${slug}`;
+
+/**
+ * Las cargas del documento que ya usó un bloque, por su entrada de navegación (`PerformanceNavigationTiming`, una por
+ * documento): la bandera del módulo que se apaga tras el primer montaje, para que «Atrás» dentro de la aplicación no cuente
+ * como llegada. Por la entrada y no un booleano suelto, para que cada carga (y cada prueba, que simula la suya) tenga la
+ * suya.
+ */
+const usedLoads = new WeakSet<object>();
+
+/** Si este es el primer montaje desde que cargó el documento y esa carga no fue una recarga. Sin saberlo, no. */
+function firstLoad(): boolean {
+  if (typeof performance === "undefined" || typeof performance.getEntriesByType !== "function") return false;
+  const entry = performance.getEntriesByType("navigation")[0] as (PerformanceEntry & { type?: string }) | undefined;
+  if (entry === undefined || usedLoads.has(entry)) return false;
+  usedLoads.add(entry);
+  return entry.type !== undefined && entry.type !== "reload";
+}
 
 export function MyListBlock({ action, courses, permalink, id, offset }: MyListBlockProps) {
   const [state, formAction, pending] = useActionState(action, IDLE, permalink);
@@ -124,9 +142,13 @@ export function MyListBlock({ action, courses, permalink, id, offset }: MyListBl
   // Si se llegó por «Mi lista» de la barra: se dice que no hay nada guardado.
   const [arrived, setArrived] = useState(false);
 
-  // Al llegar por la barra: desde otra pantalla (la marca la consume el bloque al montarse) o desde el mismo inicio (lo
-  // avisa el enlace, antes de que el enrutador desplace: el foco espera un cuadro y no desplaza; el aviso usa también la
-  // marca, para que no quede viva para otro montaje). Y si alguien escribe el ancla a mano (`hashchange`).
+  // Al llegar por la barra desde el mismo inicio, lo avisa el enlace, antes de que el enrutador desplace: el foco espera un
+  // cuadro y no desplaza; el aviso usa también la marca, para que no quede viva para otro montaje. Al montarse, solo con el
+  // ancla en la dirección y además la marca de la barra (llegada dentro de la aplicación, desde otra pantalla) o la primera
+  // carga del documento que no fue una recarga (`firstLoad`: «Mi lista» pulsada antes de hidratar navega como un enlace del
+  // navegador, sin marca). La marca se consume siempre al montarse, haya ancla o no: si quedara viva (una navegación
+  // abandonada, o un inicio sin el bloque), el siguiente inicio con ancla tomaría el foco sin que nadie llegara por la barra.
+  // Y si alguien escribe el ancla a mano (`hashchange`).
   useEffect(() => {
     const focus = () => {
       setArrived(true);
@@ -139,7 +161,10 @@ export function MyListBlock({ action, courses, permalink, id, offset }: MyListBl
     const fromAddress = () => {
       if (window.location.hash === `#${id}`) focus();
     };
-    if (takeArrival()) focus();
+    // Los dos se consumen siempre: la marca y la primera carga se usan una sola vez.
+    const marked = takeArrival();
+    const fresh = firstLoad();
+    if (window.location.hash === `#${id}` && (marked || fresh)) focus();
     window.addEventListener(MY_LIST_ARRIVAL, fromBar);
     window.addEventListener("hashchange", fromAddress);
     return () => {
