@@ -122,6 +122,23 @@ describe("la lista (PA-24)", () => {
     expect(new FormData(screen.getByRole("button", { name: "Borrar" }).closest("form")!).get("desde")).toBe(cursor);
   });
 
+  // T-616, 3b-3: la cabecera del rediseño, sin foto, con «Volver a Cuenta» arriba, el antetítulo, el título y la entradilla.
+  it("la cabecera del rediseño: «Volver a Cuenta», el antetítulo en oro, el título y la entradilla, todo en ella", async () => {
+    const { view } = show();
+    const header = view.container.querySelector("[data-page-header]");
+    expect(header).not.toBeNull();
+    const inHeader = within(header as HTMLElement);
+    expect(inHeader.getByRole("link", { name: "Volver a Cuenta" })).toHaveAttribute("href", "/cuenta");
+    expect(inHeader.getByText("Cuenta", { selector: "p" })).toHaveClass("eyebrow", "text-accent");
+    expect(inHeader.getByRole("heading", { level: 1, name: "Mis comentarios" })).toHaveAttribute("tabindex", "-1");
+    expect(inHeader.getByText(/Lo que escribiste en las lecciones/)).toBeVisible();
+    expect(header?.querySelector("img")).toBeNull();
+    expect(screen.getByRole("main")).toHaveClass("max-w-page");
+    expect(header).not.toContainElement(screen.getByRole("article"));
+    expect(screen.getByRole("article").closest(".max-w-form")).not.toBeNull();
+    expect(await a11yViolations(view.container)).toEqual([]);
+  });
+
   it("borrar pregunta antes, con la revisión que se vio", async () => {
     const action = vi.fn(async (): Promise<MineState> => ({ ...IDLE_MINE, attempt: 1, asking: id(1) }));
     const { user } = show({ items: [item(1, { revision: 4 })] }, action);

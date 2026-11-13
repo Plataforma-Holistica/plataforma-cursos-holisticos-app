@@ -237,6 +237,8 @@ test("sin acceso a la lección, Beto llega desde «Cuenta» a lo suyo y borra lo
     await page.getByRole("dialog", { name: "¿Borrar tu comentario?" }).getByRole("button", { name: "Sí, borrarlo" }).click();
     await expect(page.getByText("Borraste tu comentario.")).toBeVisible();
     await expect(page.getByText("Una pregunta sobre la postura.")).toHaveCount(0);
+    // T-616, 3b-3: el título es el de la cabecera del rediseño, y el foco sigue llegando a él después de borrar.
+    await expect(page.getByRole("heading", { level: 1, name: "Mis comentarios" })).toBeFocused();
   });
 });
 

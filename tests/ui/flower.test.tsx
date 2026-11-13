@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
+import { createRef } from "react";
 import { describe, expect, it } from "vitest";
 
 import { a11yViolations } from "../setup/a11y";
@@ -100,6 +101,31 @@ describe("la cabecera de pantalla (T-616)", () => {
     expect(screen.getByText("Portal del maestro")).toHaveClass("eyebrow", "text-accent");
     expect(container.querySelector("[data-page-header] svg")).toHaveAttribute("aria-hidden", "true");
     expect(await a11yViolations(container)).toEqual([]);
+  });
+
+  // T-616, 3b-3: «Mis comentarios» lleva el foco al título después de borrar, y su título es el de la cabecera.
+  it("con `titleRef`, la referencia llega al h1, que toma el foco por programa sin contorno; sin ella, el h1 no se enfoca", () => {
+    const ref = createRef<HTMLHeadingElement>();
+    const { unmount } = render(<PageHeader title="Mis comentarios" titleRef={ref} />);
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(ref.current).toBe(heading);
+    expect(heading).toHaveAttribute("tabindex", "-1");
+    expect(heading).toHaveClass("outline-none");
+    act(() => ref.current?.focus());
+    expect(heading).toHaveFocus();
+    unmount();
+    render(<PageHeader title="Cuenta" />);
+    expect(screen.getByRole("heading", { level: 1 })).not.toHaveAttribute("tabindex");
+  });
+
+  it("lo de arriba (`above`, un «Volver a…») va dentro de la cabecera, antes del antetítulo y del título", () => {
+    const { container } = render(<PageHeader above={<a href="/cuenta">Volver a Cuenta</a>} eyebrow="Cuenta" title="Mis comentarios" />);
+    const header = container.querySelector("[data-page-header]");
+    const back = screen.getByRole("link", { name: "Volver a Cuenta" });
+    expect(header).toContainElement(back);
+    const eyebrow = screen.getByText("Cuenta");
+    expect(back.compareDocumentPosition(eyebrow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(eyebrow.compareDocumentPosition(screen.getByRole("heading", { level: 1 })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
