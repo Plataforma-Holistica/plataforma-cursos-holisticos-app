@@ -631,18 +631,21 @@
   --media-accent-color: var(--accent);
   /* Donde el oro es fondo, el icono va en `on-accent` (11.44). Solo ahí: el central del teléfono es transparente al pasar,
      y `::part(button)` a secas lo tomaría. Nunca `--media-text-color` en un botón: se hereda a su tooltip, que va sobre
-     casi negro. El «1x» de la velocidad y el tiempo pintan texto: su `color`, que el tooltip no hereda. */
-  &::part(bottom button):hover {
-    --media-icon-color: var(--on-accent);
-  }
-  &::part(pre-play):hover {
-    --media-icon-color: var(--on-accent);
-  }
-  &::part(playback-rate button):hover {
-    color: var(--on-accent);
-  }
-  &::part(time display):hover {
-    color: var(--on-accent);
+     casi negro. El «1x» de la velocidad y el tiempo pintan texto: su `color`, que el tooltip no hereda. Solo donde hay
+     cursor: en una pantalla táctil `:hover` se queda puesto después del toque (falta verlo en el iPhone). */
+  @media (hover: hover) {
+    &::part(bottom button):hover {
+      --media-icon-color: var(--on-accent);
+    }
+    &::part(pre-play):hover {
+      --media-icon-color: var(--on-accent);
+    }
+    &::part(playback-rate button):hover {
+      color: var(--on-accent);
+    }
+    &::part(time display):hover {
+      color: var(--on-accent);
+    }
   }
   /* Lo visto, en oro, contra lo cargado (blanco opaco en Mux: daba 1.55) y contra la pista: los dos translúcidos, para que
      el avance se distinga de los dos (3:1 sobre el negro del reproductor; `contrast.test.ts`). Lo cargado va dentro de la
