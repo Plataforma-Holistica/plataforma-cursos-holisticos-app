@@ -13,7 +13,7 @@ import { SeedMark } from "./flower";
 // espera es el texto.
 //
 // `size="compact"` (T-616, solicitud 3) es el de un lugar chico, como el del reproductor (PA-33): la semilla más chica y menos
-// aire, para que quepa en un 16:9 del teléfono.
+// aire. Desde `sm` cabe en un 16:9; a 320 px no (288 × 162), y la lección deja crecer su lugar (3b-2).
 //
 // Desde la 3b-1:
 // - `titleLevel` pinta el título como encabezado de ese nivel (PA-33 en la lección, un `h2`; PA-32, el `h1`). Sin él, un

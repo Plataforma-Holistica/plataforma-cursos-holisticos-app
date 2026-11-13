@@ -1424,6 +1424,28 @@ que no se ve leyendo un solo archivo:
   pruebas de `my-list.test.tsx`, `choice.test.ts`, `teacher-card.test.tsx`, `paywall-state.test.tsx` y `contrast.test.ts`. Decisiones mías
   sin confirmar: el nombre «Tu cuenta y accesos» también para quien no tiene accesos; la marca en la memoria del módulo. Para el A: las dos
   fotos nuevas van en `PRACTICE_PHOTOS`, con su crédito.
+- **Lo que T-616 suma al carril B** (la 3b-2, la lección, sin migración; zona delicada por la medición; plan en
+  `~/.claude/plans/t616-sol3b-plan.md`, «La 3b-2 en detalle», con su revisión de diseño y las decisiones del carril A del 2026-11-12).
+  **PA-33 es `PaywallState`** (se fue el `Paywall` local): con PA-33 la `<section>` del reproductor no se pega arriba y el área va en
+  `aspect-auto sm:aspect-video` (a 320 px el estado no cabe en 288 × 162); con video nada cambia. **La cabecera:** el módulo como
+  antetítulo (`moduleTitle`, de `page.lesson.moduleTitle`, con la utilidad `eyebrow` en oro apagado), el `<h1>` en `text-h1`, los dos con
+  `wrap-anywhere`, y `min-w-0` en la columna; «Sobre esta lección» ya no repite el módulo (`aboutDuration`). El temario lleva la roseta y la
+  barra fina. **Nada condicional ni con `key` delante del reproductor:** `tests/ui/lesson-screen.test.tsx` cuenta montajes y desmontajes
+  del `Player` simulado (`player.mounts`, `player.unmounts`) mientras cambia todo alrededor; una sección que cambie de tipo o de `key` la
+  hace fallar. **El oro en Mux** (`@utility player-mux`): `--media-accent-color: var(--accent)` en el cuerpo de la utilidad; el icono en
+  `--on-accent` solo donde el oro es fondo (`::part(bottom button):hover` y `::part(pre-play):hover`; nunca `::part(button)` a secas, que
+  toma el central del teléfono, transparente al pasar, ni `--media-text-color` en un botón, que se hereda a su tooltip); el «1x» y el
+  tiempo al pasar con `color`, las cuatro dentro de `@media (hover: hover)` (en lo táctil `:hover` se queda puesto); lo cargado (0.25) y la pista (0.2) translúcidos, medidos juntos porque lo cargado va dentro de la pista; los
+  menús en `surface-2` y lo elegido de la velocidad en `surface-3`. `tests/design/theme.test.ts` lee cada regla y `contrast.test.ts` mide
+  el avance contra lo cargado y la pista sobre el negro. Límites: sobre un cuadro claro del video lo translúcido baja; la burbuja de la vista
+  previa del tiempo sigue blanca; el botón «activar sonido» no existe en Mux 3.14; Safari y el `:hover` táctil se miran en el iPhone.
+  **Al subir `@mux/mux-player-react`** se revisan en su tema (`base.mjs`) todas las partes y variables que usa `player-mux`
+  (`bottom`, `button`, `pre-play`, `playback-rate`, `time`, `display`, `range`, `menu`, `--media-accent-color`, `--media-icon-color`,
+  `--media-time-range-buffered-color`, `--media-range-track-background`, `--media-menu-*`): las pruebas fijan el texto de `theme.css`,
+  no que Mux siga llamándolas así. `tests/e2e/equipo/leccion.equipo.ts` comprueba a 320 px el botón de PA-33 entero, dentro de su lugar y sin nada encima.
+  Cambió por el requisito el texto de `about` en las pruebas de la pantalla. Decisiones del carril A sin confirmar por Sergio: PA-33 crece
+  en el teléfono y no se pega; «Sobre esta lección» sin el módulo; el reproductor en oro con los menús oscuros. Mías sin confirmar: lo
+  cargado en 0.25 y la pista en 0.2; lo elegido de la velocidad en `surface-3`. Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

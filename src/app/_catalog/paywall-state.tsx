@@ -5,10 +5,9 @@ import { FlowerState } from "@/ui/flower-state";
 import { paywallAction, paywallCopy, type Denial } from "./paywall";
 
 // PA-33 con el lenguaje del sistema visual (T-616, solicitud 3): por qué no hay acceso, como un estado con la flor, y la acción
-// a los planes con la lección como destino (T-302). Va en el lugar del reproductor, así que es el estado chico: cabe en un
-// 16:9 del teléfono. El título y la frase los da `paywallCopy`, y la acción `paywallAction`, los mismos de siempre.
-//
-// La lección (`cursos/*/lecciones/`, con dueño) todavía pinta su propio `Paywall`: cambiarlo por este es de la solicitud 3b.
+// a los planes con la lección como destino (T-302). Va en el lugar del reproductor, así que es el estado chico. Desde `sm`
+// cabe en el 16:9; más angosto no (a 320 px el lugar mide 288 × 162), y la lección deja que su lugar crezca con lo suyo
+// (T-616, 3b-2). El título y la frase los da `paywallCopy`, y la acción `paywallAction`, los mismos de siempre.
 
 export function PaywallState({ denial, back }: { denial: Denial; back: string | null }) {
   const [title, sentence] = paywallCopy(denial);

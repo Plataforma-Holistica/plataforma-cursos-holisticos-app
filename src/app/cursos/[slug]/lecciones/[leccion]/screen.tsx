@@ -7,6 +7,7 @@ import { PASSWORD_BLOCK_ID } from "@/app/(cuenta)/cuenta/password-block";
 import { clockTime, PRODUCT_TIME_ZONE } from "@/app/_lib/dates";
 import { deviceName } from "@/app/_lib/devices";
 import type { PlayerProps, WatchSignal } from "@/app/_video/player";
+import { PaywallState } from "@/app/_catalog/paywall-state";
 import { downloadResourceAction } from "@/app/_catalog/resources/actions";
 import { ResourceList, type ResourceItem } from "@/app/_catalog/resources/resource-list";
 import { LessonComments } from "@/app/_comments/lesson-comments";
@@ -15,7 +16,7 @@ import { comments as commentText } from "@/messages/es/comments";
 import { lesson as text } from "@/messages/es/lesson";
 import { resources as resourceText } from "@/messages/es/resources";
 import { plural, t } from "@/messages/format";
-import { lessonPath, plansPath, ROUTES } from "@/services/account/navigation";
+import { lessonPath, ROUTES } from "@/services/account/navigation";
 import { BackLink } from "@/ui/back-link";
 import { Button } from "@/ui/button";
 import { CourseCover } from "@/ui/course-cover";
@@ -32,7 +33,7 @@ import { cutSegment, observeWatch, startSegments, stopSegment, type SegmentBuild
 
 import { flushHeartbeatsAction, playbackPresenceAction, rememberCaptionsAction, watchLessonAction } from "./actions";
 import { lessonCommentAction } from "./comment-actions";
-import { paywallAction, paywallCopy, type BusyRow, type Denial, type HeartbeatReply, type InitialState, type ProgressNote, type WatchAnswer } from "./outcomes";
+import { paywallCopy, type BusyRow, type Denial, type HeartbeatReply, type InitialState, type ProgressNote, type WatchAnswer } from "./outcomes";
 import { courier } from "./watch-queue";
 
 // La pantalla de una lección (PA-22, T-203; diseño, sección 6.2). En escritorio, dos columnas:
@@ -97,6 +98,8 @@ export interface LessonScreenProps {
   /** La portada generada del curso, detrás de «Reproducir» (decisión de Sergio del 2026-11-05). Nula si no se supo. */
   cover: { practiceName: string | null; tone: number | null } | null;
   summary: string | null;
+  /** El módulo de la lección, para el antetítulo de la cabecera (T-616, 3b-2). Nulo si no se supo. */
+  moduleTitle: string | null;
   about: string;
   modules: { id: string; title: string; lessons: SyllabusEntry[] }[];
   next: { title: string; href: string } | null;
@@ -299,23 +302,7 @@ function Elsewhere({ live, onClose, onRetry }: { live: BusyRow[]; onClose: (sess
   );
 }
 
-/** PA-33: por qué no hay acceso, en el lugar del reproductor, y la acción a los planes con esta lección como destino (T-302). */
-function Paywall({ denial, back }: { denial: Denial; back: string | null }) {
-  const [title, sentence] = paywallCopy(denial);
-  return (
-    <div className="flex h-full flex-col justify-center gap-2 p-6">
-      <h2 className="text-h3">{title}</h2>
-      <p className="text-text-2">{sentence}</p>
-      <div className="pt-2">
-        <Button href={plansPath(back)} size="md">
-          {paywallAction(denial)}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, summary, about, modules, next, progress, initial, captions, resources, comments }: LessonScreenProps) {
+export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, summary, moduleTitle, about, modules, next, progress, initial, captions, resources, comments }: LessonScreenProps) {
   const mounted = useMounted();
   const [video, setVideo] = useState<VideoState>(() => stateOf(initial));
   const [captionsOn, setCaptionsOn] = useState(captions);
@@ -543,6 +530,7 @@ export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, 
   const syllabus = (prefix: string, Heading: "h2" | "h3") => (
     <div className="flex flex-col gap-4">
       <ProgressBar
+        size="thin"
         value={completedShown}
         max={progress.total}
         label={text.syllabusProgressLabel}
@@ -563,6 +551,7 @@ export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, 
                   duration={lesson.duration}
                   current={lesson.current}
                   state={rowState(lesson)}
+                  rosette
                 />
               </li>
             ))}
@@ -620,9 +609,14 @@ export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, 
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="mx-auto flex max-w-page flex-col gap-6 px-4 pt-6 pb-24 outline-none sm:pb-6">
       <BackLink href={course.href}>{text.back}</BackLink>
       <div className="grid gap-8 lg:grid-cols-10">
-        <div className="flex flex-col gap-4 lg:col-span-7">
-          {/* Pegado arriba al desplazar, en teléfono; PA-34 no: crece, y taparía la página. */}
-          <section aria-label={text.player.label} className={video.kind === "busy" ? undefined : "sticky top-0 z-(--z-sticky) lg:static"}>
+        {/* `min-w-0`: una palabra larga del título no ensancha la columna (ni la página, en el teléfono). */}
+        <div className="flex min-w-0 flex-col gap-4 lg:col-span-7">
+          {/* Pegado arriba al desplazar, en teléfono. PA-34 no: crece, y taparía la página. PA-33 tampoco (T-616, 3b-2): no hay
+              video que seguir, y en el teléfono crece. Solo cambia la clase: el reproductor no se vuelve a montar. */}
+          <section
+            aria-label={text.player.label}
+            className={video.kind === "busy" || video.kind === "denied" ? undefined : "sticky top-0 z-(--z-sticky) lg:static"}
+          >
             {/* PA-22, «Sin conexión»: una nota chica arriba, en su propia región viva (existe desde
                 antes, para que se anuncie): junto con la del reproductor, prenderla o quitarla
                 volvería a decir el estado entero. */}
@@ -632,8 +626,15 @@ export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, 
             <div
               ref={area}
               tabIndex={-1}
-              // PA-34 crece lo necesario: en un teléfono, sus tarjetas no caben en el 16:9.
-              className={video.kind === "busy" ? "flex min-h-0 w-full flex-col bg-player outline-none" : "flex aspect-video w-full flex-col bg-player outline-none"}
+              // PA-34 crece lo necesario: en un teléfono, sus tarjetas no caben en el 16:9. PA-33 también, solo en el teléfono
+              // (T-616, 3b-2; decisión del carril A del 2026-11-12): a 320 px su estado no cabe en 288 × 162, y desde `sm` sí.
+              className={
+                video.kind === "busy"
+                  ? "flex min-h-0 w-full flex-col bg-player outline-none"
+                  : video.kind === "denied"
+                    ? "flex aspect-auto w-full flex-col bg-player outline-none sm:aspect-video"
+                    : "flex aspect-video w-full flex-col bg-player outline-none"
+              }
             >
               {video.kind === "playing" ? (
                 <Player
@@ -663,7 +664,7 @@ export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, 
                   }}
                 />
               ) : video.kind === "denied" ? (
-                <Paywall denial={video.denial} back={lessonPath(slug, lessonId)} />
+                <PaywallState denial={video.denial} back={lessonPath(slug, lessonId)} />
               ) : video.kind === "busy" ? (
                 <Elsewhere
                   live={video.live}
@@ -730,8 +731,11 @@ export function LessonScreen({ slug, lessonId, heading, course, teacher, cover, 
               {completedNow ? text.justCompleted : ""}
             </p>
           </section>
+          {/* La cabecera (T-616, 3b-2): el módulo como antetítulo en oro apagado, sobre el fondo liso, y el título más grande.
+              Va después del reproductor: lo que cambie aquí no lo vuelve a montar. */}
           <div className="flex flex-col gap-1">
-            <h1 className="text-h2">{heading}</h1>
+            {moduleTitle !== null && <p className="eyebrow text-accent-muted wrap-anywhere">{moduleTitle}</p>}
+            <h1 className="text-h1 wrap-anywhere">{heading}</h1>
             <p className="text-body-s text-text-2">
               <TextLink href={course.href}>{course.title}</TextLink>
               {BYLINE_SEPARATOR}
