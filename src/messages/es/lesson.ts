@@ -20,7 +20,7 @@ export const lesson = defineMessages({
   // Se dice una vez, cuando un latido deja terminada la lección que se está viendo.
   justCompleted: "Esta lección ya cuenta como terminada.",
   about: "Sobre esta lección",
-  aboutDuration: "Dura {duration}. Es del módulo «{module}».",
+  aboutDuration: "Dura {duration}.",
   minutes: "{minutes} min",
   player: {
     label: "Reproductor",

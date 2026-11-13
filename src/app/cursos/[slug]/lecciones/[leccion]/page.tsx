@@ -128,7 +128,9 @@ export default async function LessonRoute({ params, searchParams }: { params: Pr
         teacher={{ name: page.course.teacherName, href: teacherHref }}
         cover={listed === null ? null : { practiceName: listed.practice?.name ?? null, tone: listed.practice?.tone ?? null }}
         summary={page.course.summary}
-        about={t(text.aboutDuration, { duration: minutes(page.lesson.durationSeconds), module: page.lesson.moduleTitle })}
+        moduleTitle={page.lesson.moduleTitle}
+        // El módulo va en el antetítulo de la cabecera (T-616, 3b-2): esta frase ya no lo repite.
+        about={t(text.aboutDuration, { duration: minutes(page.lesson.durationSeconds) })}
         modules={page.modules.map((group) => ({ id: group.id, title: group.title, lessons: group.lessons.map(entry) }))}
         next={page.next === null ? null : { title: page.next.title, href: lessonPath(page.course.slug, page.next.id) ?? path }}
         progress={page.progress}
