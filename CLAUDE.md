@@ -1470,13 +1470,16 @@ que no se ve leyendo un solo archivo:
   anual se destaca, siempre con su cifra (`featured === (saving !== null)`); lo usan `plansView` y `showcaseView`, así que la portada y
   `/planes` dicen lo mismo del mismo par (la paridad de `view.test.ts` lo compara). La portada puede ir hasta 60 s atrás, como su precio.
   **Destacar no elige:** sin `?plan=` no hay «Antes de pagar», el ahorro no entra en lo que se firma ni en el formulario, y el botón
-  principal es el del anual solo sin plan elegido (`primary`; un solo principal por pantalla: elegido uno, el principal es pagar). En la
-  portada el anual va siempre en secundario (el principal es «Suscribirme») y «Ver planes» sale solo si los precios no se leyeron.
+  principal es el del anual solo sin plan elegido y solo para quien puede pagar o crear su cuenta (`primary`, con `pay` o `visitor`; un solo
+  principal por pantalla: elegido uno, el principal es pagar, y con un pago en confirmación o con acceso el aviso dice que no vuelva a
+  pagar). En la portada el anual va siempre en secundario (el principal es «Suscribirme») y «Ver planes» sale solo si los precios no se
+  leyeron. Lado a lado, la tarjeta sin antetítulo baja su contenido lo que él mide con su espacio (`sm:pt-15` en `/planes`, `sm:pt-14` en
+  la portada), para que los títulos queden a la misma altura; si cambia el antetítulo o el espacio, cambia eso (`portada.spec.ts` lo mide).
   Destacado no es elegido: el antetítulo «Conviene más» en `accent-muted` antes del `<h3>` y fuera de él (el nombre del encabezado y del
   botón no cambian) y la cifra en negrita; elegido sigue con el contorno y «Plan elegido». El cuerpo de la tarjeta es uno
   (`planes/card-body.tsx`, sin estado, para que la portada no traiga la pantalla de pagar). `/planes` lleva `PageHeader` sin foto ni
-  antetítulo, con lo que incluye cualquier plan bajo el título, vendan o no. `billing.test.ts` exige que las plantillas del ahorro no
-  tengan dígitos y que solo los planes llamen a `annualSaving`; `portada.spec.ts` calcula la cifra de los parámetros y mide la frase a
+  antetítulo, vendan o no; lo que incluye cualquier plan va bajo el título solo si se venden. `billing.test.ts` exige que las plantillas del ahorro no
+  tengan dígitos y que solo los planes llamen a `annualSaving` (no atrapa un cálculo propio escrito en otro archivo); `portada.spec.ts` calcula la cifra de los parámetros y mide la frase a
   320 px con siete dígitos. Decisiones del carril A sin confirmar por Sergio: «Conviene más» y no «Mejor precio» (sin referente podía
   leerse contra otras plataformas), y el anual en secundario en la portada. Mías sin confirmar: «frente a doce meses del plan Mensual»
   (extiende el texto de Sergio para decir contra qué compara), ningún «Elegir» en primario con un plan elegido, `/planes` sin foto
