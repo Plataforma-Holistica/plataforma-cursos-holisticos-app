@@ -1460,6 +1460,31 @@ que no se ve leyendo un solo archivo:
   siguen en `text-text-2`. Decisiones mías sin confirmar: la cuenta sin antetítulo y su entradilla; «Volver a Cuenta» dentro de la
   cabecera; los bloques a la izquierda y no al centro; «Cuenta» dos veces seguidas en «Mis comentarios» (el enlace y el antetítulo).
   Para el A: nada que le toque.
+- **Lo que T-616 suma al carril B** (la 3b-4, los planes y la portada, sin migración; zona delicada: publicidad sobre el precio, LF-47;
+  plan en `~/.claude/plans/t616-3b4-planes-plan.md`, con su revisión de diseño y el visto bueno del carril A del 2026-11-13). **El anual
+  destacado dice lo que ahorra:** `annualSaving(mensual, anual)` (`planes/outcomes.ts`) da pesos enteros hacia abajo (decisión de Sergio
+  del 2026-11-12), de los dos montos de la oferta, que salen de `PRECIO_MENSUAL` y `PRECIO_ANUAL`; nulo si no ahorra al menos un peso o
+  si un monto no es un entero positivo y seguro. `savingText` da formato sin centavos **al entero ya redondeado**: `Intl` sin decimales
+  redondearía al más cercano ($1,198.99 sería «$1,199»), y lleva `minimumFractionDigits: 0` además del máximo (con solo el máximo, motores
+  anteriores a ES2023 lanzan `RangeError`). `offerCardsText` (`view.ts`) busca los planes por nombre, exige uno de cada uno, y solo el
+  anual se destaca, siempre con su cifra (`featured === (saving !== null)`); lo usan `plansView` y `showcaseView`, así que la portada y
+  `/planes` dicen lo mismo del mismo par (la paridad de `view.test.ts` lo compara). La portada puede ir hasta 60 s atrás, como su precio.
+  **Destacar no elige:** sin `?plan=` no hay «Antes de pagar», el ahorro no entra en lo que se firma ni en el formulario, y el botón
+  principal es el del anual solo sin plan elegido y solo para quien puede pagar o crear su cuenta (`primary`, con `pay` o `visitor`; un solo
+  principal por pantalla: elegido uno, el principal es pagar, y con un pago en confirmación o con acceso el aviso dice que no vuelva a
+  pagar). En la portada el anual va siempre en secundario (el principal es «Suscribirme») y «Ver planes» sale solo si los precios no se
+  leyeron. Lado a lado, la tarjeta sin antetítulo baja su contenido lo que él mide con su espacio (`sm:pt-15` en `/planes`, `sm:pt-14` en
+  la portada), para que los títulos queden a la misma altura; si cambia el antetítulo o el espacio, cambia eso (`portada.spec.ts` lo mide).
+  Destacado no es elegido: el antetítulo «Conviene más» en `accent-muted` antes del `<h3>` y fuera de él (el nombre del encabezado y del
+  botón no cambian) y la cifra en negrita; elegido sigue con el contorno y «Plan elegido». El cuerpo de la tarjeta es uno
+  (`planes/card-body.tsx`, sin estado, para que la portada no traiga la pantalla de pagar). `/planes` lleva `PageHeader` sin foto ni
+  antetítulo, vendan o no; lo que incluye cualquier plan va bajo el título solo si se venden. `billing.test.ts` exige que las plantillas del ahorro no
+  tengan dígitos y que solo los planes llamen a `annualSaving` (no atrapa un cálculo propio escrito en otro archivo); `portada.spec.ts` calcula la cifra de los parámetros y mide la frase a
+  320 px con siete dígitos. Decisiones del carril A sin confirmar por Sergio: «Conviene más» y no «Mejor precio» (sin referente podía
+  leerse contra otras plataformas), y el anual en secundario en la portada. Mías sin confirmar: «frente a doce meses del plan Mensual»
+  (extiende el texto de Sergio para decir contra qué compara), ningún «Elegir» en primario con un plan elegido, `/planes` sin foto
+  (pediría tocar `choice.ts`) y el antetítulo en oro apagado. Pendiente del A: que el abogado revise la publicidad antes de publicar.
+  Para el A: nada que le toque.
 - **El maestro entra** (T-401, `t401_aviso_y_firmas`; decisiones de Sergio del 2026-10-30; donde esto choca con la
   viñeta de la invitación y con la segunda de T-402, manda esto). **`current_active_teacher_id` también pide el aviso
   del maestro al día:** con el aviso pendiente, la base no deja escribir a su nombre, y una función `draft_*` contesta

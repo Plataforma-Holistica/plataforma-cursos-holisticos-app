@@ -101,3 +101,59 @@ test("los planes de la portada dicen el precio de la base, con «IVA incluido»,
   await expect(page.getByText(`${annual}, IVA incluido`)).toBeVisible();
   expect(await a11yViolations(page)).toEqual([]);
 });
+
+// T-616, 3b-4: lo que ahorra el anual, calculado aquí de los parámetros de la base (hacia abajo, al peso) y no copiado de la pantalla:
+// la portada y /planes dicen lo mismo. Destacar no elige: «Suscribirme» lleva a /planes sin plan, donde no hay «Antes de pagar».
+test("el anual dice lo que ahorra con los precios de la base, igual en la portada y en /planes, y destacarlo no lo elige @telefono", async ({ page }) => {
+  const saving = Math.floor((12 * (await parameter("PRECIO_MENSUAL")) - (await parameter("PRECIO_ANUAL"))) / 100);
+  expect(saving).toBeGreaterThanOrEqual(1);
+  const line = `Ahorras ${new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(saving)} al año`;
+  await page.goto("/");
+  const plans = page.getByRole("region", { name: "Planes" });
+  const annual = plans.getByRole("listitem").filter({ has: page.getByRole("heading", { level: 3, name: "Anual" }) });
+  await expect(annual.getByText(line)).toBeVisible();
+  await expect(annual.getByText("Conviene más", { exact: true })).toBeVisible();
+  await page.getByRole("main").getByRole("link", { name: "Suscribirme" }).click();
+  await expect(page).toHaveURL("/planes");
+  const card = page.getByRole("listitem").filter({ has: page.getByRole("heading", { level: 3, name: "Anual" }) });
+  await expect(card.getByText(line)).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Antes de pagar" })).toHaveCount(0);
+  expect(await a11yViolations(page)).toEqual([]);
+});
+
+// A 320 px, la frase entera dentro de su tarjeta y sin desplazamiento a los lados, también con una cifra de siete dígitos (la base de
+// prueba no tiene una: se pone en la línea ya pintada, con el mismo texto que arma la plantilla).
+test("a 320 px, la frase del ahorro cabe entera en su tarjeta, también con siete dígitos", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  for (const path of ["/", "/planes"]) {
+    await page.goto(path);
+    const line = page.getByText(/^Ahorras /);
+    await expect(line).toBeVisible();
+    await line.evaluate((element) => {
+      element.textContent = (element.textContent ?? "").replace(/\$[\d,]+/, () => "$1,234,567");
+    });
+    await expect(line).toContainText("$1,234,567");
+    const fits = await line.evaluate((element) => {
+      const card = element.closest("li");
+      if (card === null) return false;
+      const box = element.getBoundingClientRect();
+      const frame = card.getBoundingClientRect();
+      return element.scrollWidth <= element.clientWidth && box.left >= frame.left && box.right <= frame.right;
+    });
+    expect(fits, path).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), path).toBe(true);
+  }
+});
+
+// Revisión del carril A sobre de38193: en computadora, con el anual destacado, los títulos de las dos tarjetas a la misma altura, solo
+// con disposición (el antetítulo no cambia de lugar en el documento ni hay nada nuevo que se lea).
+test("en computadora, los títulos «Mensual» y «Anual» quedan a la misma altura, en /planes y en la portada", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  for (const path of ["/planes", "/"]) {
+    await page.goto(path);
+    const top = async (name: string) => (await page.getByRole("heading", { level: 3, name, exact: true }).boundingBox())?.y ?? Number.NaN;
+    await expect(page.getByText("Conviene más", { exact: true })).toBeVisible();
+    const [monthly, annual] = [await top("Mensual"), await top("Anual")];
+    expect(Math.abs(monthly - annual), `${path}: ${monthly} y ${annual}`).toBeLessThanOrEqual(1);
+  }
+});

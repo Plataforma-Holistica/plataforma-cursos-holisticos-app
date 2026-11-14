@@ -77,6 +77,30 @@ export function priceText(cents: number): string {
   return MONEY.format(cents / 100);
 }
 
+/**
+ * Lo que ahorra el anual contra doce meses del mensual, en pesos enteros, hacia abajo (decisión de Sergio del 2026-11-12; T-616, 3b-4):
+ * nunca se anuncia más de lo que se ahorra. Nulo si no ahorra al menos un peso, o si un monto no es un entero positivo y seguro de centavos.
+ * Es publicidad sobre el precio (LF-47): sale de los dos montos de la oferta, nunca de una cifra escrita. El equivalente al mes va hacia
+ * arriba y esto hacia abajo: los dos del lado de quien paga, aunque no cuadren al centavo entre sí.
+ */
+export function annualSaving(monthlyCents: number, annualCents: number): number | null {
+  const amount = (cents: number) => Number.isSafeInteger(cents) && cents > 0;
+  if (!amount(monthlyCents) || !amount(annualCents)) return null;
+  const twelve = 12 * monthlyCents;
+  if (!Number.isSafeInteger(twelve)) return null;
+  // En centavos enteros y al peso hacia abajo antes de dar formato: `Intl` sin decimales redondearía al más cercano.
+  const pesos = Math.floor((twelve - annualCents) / 100);
+  return pesos >= 1 ? pesos : null;
+}
+
+// Los dos topes en cero: con solo el máximo, MXN trae 2 de mínimo y los motores anteriores a ES2023 lanzan `RangeError`.
+const WHOLE_PESOS = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+/** «$1,198»: un entero de pesos que ya salió de `annualSaving`, sin centavos. Recibe solo enteros: no redondea nada. */
+export function savingText(pesos: number): string {
+  return WHOLE_PESOS.format(pesos);
+}
+
 export interface PlansQuery {
   /** El plan elegido en la dirección (`?plan=`), o nulo: los dos se muestran sin elegir. */
   plan: CheckoutPlan | null;

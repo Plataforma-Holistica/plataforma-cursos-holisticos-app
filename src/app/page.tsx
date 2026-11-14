@@ -2,6 +2,7 @@ import Image from "next/image";
 
 import { PublicFooter } from "@/app/_public/footer";
 import { PublicHeader } from "@/app/_public/header";
+import { PlanCardBody } from "@/app/planes/card-body";
 import { PlanIncludes } from "@/app/planes/includes";
 import { plansLegalHref } from "@/app/planes/legal-href";
 import { showcaseView, type ShowcaseCard } from "@/app/planes/view";
@@ -17,6 +18,7 @@ import { CourseCover } from "@/ui/course-cover";
 import { FlowerMark } from "@/ui/flower";
 import { InlineAlert } from "@/ui/inline-alert";
 import portada from "@/ui/photos/portada-muelle.jpg";
+import { cx } from "@/ui/cx";
 import { MAIN_CONTENT_ID } from "@/ui/skip-link";
 import { TeacherCard } from "@/ui/teacher-card";
 import { TextLink } from "@/ui/text-link";
@@ -49,14 +51,14 @@ const PLANS_ID = "portada-planes";
 
 const HOW = [text.how.catalog, text.how.lessons, text.how.pace] as const;
 
-/** Un plan en la portada: lo mismo que su tarjeta de `/planes` dice, y a elegirlo allá. */
-function planCard(card: ShowcaseCard) {
+/** Un plan en la portada: lo mismo que su tarjeta de `/planes` dice (también el anual destacado y lo que ahorra, T-616 3b-4), y a
+ * elegirlo allá. Siempre en secundario: aquí el principal es «Suscribirme» (decisión del carril A del 2026-11-13, sin confirmar por Sergio). */
+function planCard(card: ShowcaseCard, level: boolean) {
   return (
-    <li key={card.plan} className="flex flex-col items-start gap-2 rounded-md border border-border bg-surface-1 p-6">
-      <h3 className="text-h3">{card.name}</h3>
-      <p className="text-h2">{card.price}</p>
-      <p className="text-body-s text-text-2">{card.repeat}</p>
-      {card.equivalent !== null && <p className="text-body-s text-text-2">{card.equivalent}</p>}
+    // Lado a lado (desde `sm`), la que no lleva antetítulo baja su contenido lo que mide el antetítulo con su espacio (24 + 8 px), para
+    // que los títulos queden a la misma altura: solo disposición (`portada.spec.ts` lo mide).
+    <li key={card.plan} className={cx("flex flex-col items-start gap-2 rounded-md border border-border bg-surface-1 p-6", level && "sm:pt-14")}>
+      <PlanCardBody card={card} />
       <Button href={card.href} variant="secondary" className="mt-2">
         {card.chooseLabel}
       </Button>
@@ -199,15 +201,18 @@ export default async function LandingPage() {
               </h2>
               {plans.kind === "ready" && (
                 <ul className="grid gap-4 sm:grid-cols-2">
-                  {plans.cards.map(planCard)}
+                  {plans.cards.map((card) => planCard(card, plans.cards.some((each) => each.featured) && !card.featured))}
                 </ul>
               )}
               <PlanIncludes id="portada-planes-incluye" />
-              <div>
-                <Button href={ROUTES.plans} variant="secondary">
-                  {text.plans.seeAll}
-                </Button>
-              </div>
+              {/* Con tarjetas, cada una lleva a su plan; «Ver planes» solo cuando los precios no se pudieron leer (T-616, 3b-4). */}
+              {plans.kind === "unavailable" && (
+                <div>
+                  <Button href={ROUTES.plans} variant="secondary">
+                    {text.plans.seeAll}
+                  </Button>
+                </div>
+              )}
             </section>
           )}
         </div>

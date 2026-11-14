@@ -23,6 +23,12 @@ export const plans = defineMessages({
   monthlyRepeat: "Se cobra cada mes.",
   annualRepeat: "Se cobra una vez al año.",
   annualEquivalent: "Equivale a {price} al mes.",
+  // T-616, 3b-4: el anual destacado. «Conviene más» (decisión del carril A del 2026-11-13, sin confirmar por Sergio: «Mejor precio» sin
+  // referente podía leerse contra otras plataformas; lo revisa el abogado, LF-47). El ahorro en pesos y hacia abajo es de Sergio
+  // (2026-11-12); «frente a doce meses del plan Mensual» lo extiende para decir contra qué compara. Sin cifras escritas: la pone
+  // `annualSaving` con los montos de la base, y tests/architecture/billing.test.ts lo exige.
+  featured: "Conviene más",
+  saving: "Ahorras {saving} al año frente a doce meses del plan Mensual.",
   choose: "Plan",
   chooseThis: "Elegir el plan {plan}",
   chosen: "Plan elegido",

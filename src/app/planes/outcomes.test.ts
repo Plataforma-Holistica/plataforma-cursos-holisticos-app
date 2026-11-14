@@ -1,6 +1,7 @@
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { closedPlansDetour, confirmingHref, monthlyEquivalent, plansAnswerOf, plansHref, priceText, readPlansForm, readPlansQuery } from "./outcomes";
+import { annualSaving, closedPlansDetour, confirmingHref, monthlyEquivalent, plansAnswerOf, plansHref, priceText, readPlansForm, readPlansQuery, savingText } from "./outcomes";
 
 const DOC = "11111111-2222-4333-8444-555555555555";
 
@@ -126,5 +127,67 @@ describe("PA-04, cifras y direcciones", () => {
     expect(readPlansQuery({ volver: "/planes?plan=annual" }, all).returnTo).toBeNull();
     expect(readPlansQuery({ volver: "/planes/algo" }, all).returnTo).toBeNull();
     expect(readPlansQuery({ volver: "/planes-de-estudio" }, all).returnTo).toBe("/planes-de-estudio");
+  });
+});
+
+// T-616, 3b-4: lo que ahorra el anual contra doce meses del mensual, en pesos enteros y hacia abajo (decisión de Sergio del
+// 2026-11-12): nunca se anuncia más de lo que se ahorra. De menos de un peso, o si no ahorra, nada.
+describe("PA-04, lo que ahorra el anual", () => {
+  it("con los precios de la semilla: 12 × $349.00 − $2,990.00 son $1,198", () => {
+    expect(annualSaving(34900, 299000)).toBe(1198);
+    expect(savingText(1198)).toBe("$1,198");
+  });
+
+  it("sale de los montos, no de una cifra escrita: otro par da otra cifra", () => {
+    // 12 × $399.00 − $3,990.00 = $798.
+    expect(annualSaving(39900, 399000)).toBe(798);
+    expect(savingText(798)).toBe("$798");
+  });
+
+  it("hacia abajo al peso, también donde el redondeo al más cercano subiría", () => {
+    // 418 800 − 298 901 = 119 899 centavos: $1,198.99 se anuncia $1,198, no $1,199.
+    expect(annualSaving(34900, 298901)).toBe(1198);
+    // 99 centavos de ahorro: menos de un peso, nada.
+    expect(annualSaving(34900, 418701)).toBeNull();
+    // Justo un peso.
+    expect(annualSaving(34900, 418700)).toBe(1);
+  });
+
+  it("si el anual cuesta lo mismo o más que doce meses, no hay ahorro", () => {
+    expect(annualSaving(34900, 418800)).toBeNull();
+    expect(annualSaving(34900, 500000)).toBeNull();
+  });
+
+  it("de montos que no son enteros positivos y seguros de centavos, nada", () => {
+    for (const [monthly, annual] of [
+      [0, 299000],
+      [34900, 0],
+      [-34900, 299000],
+      [34900, -1],
+      [349.5, 299000],
+      [34900, 2990.5],
+      [Number.NaN, 299000],
+      [34900, Number.POSITIVE_INFINITY],
+      [Number.MAX_SAFE_INTEGER, 299000],
+    ])
+      expect(annualSaving(monthly as number, annual as number), `${monthly} y ${annual}`).toBeNull();
+  });
+
+  it("la cifra nunca pasa del ahorro real ni se queda un peso o más abajo (propiedad)", () => {
+    const cents = fc.integer({ min: 1, max: 999_999_999_999 });
+    fc.assert(
+      fc.property(cents, cents, (monthly, annual) => {
+        const real = 12 * monthly - annual;
+        const pesos = annualSaving(monthly, annual);
+        if (real < 100) return pesos === null;
+        return pesos !== null && Number.isInteger(pesos) && pesos * 100 <= real && real < pesos * 100 + 100;
+      }),
+    );
+  });
+
+  it("el texto de la cifra es el entero que recibe, sin centavos ni redondeo; siete cifras caben con sus comas", () => {
+    expect(savingText(1)).toBe("$1");
+    expect(savingText(1234567)).toBe("$1,234,567");
+    fc.assert(fc.property(fc.integer({ min: 1, max: 99_999_999 }), (pesos) => savingText(pesos).replace(/[$,]/g, "") === String(pesos)));
   });
 });
